@@ -1,4 +1,5 @@
 use std::io;
+use std::time::{Instant};
 
 macro_rules! parse_input {
     ($x:expr, $t:ident) => ($x.trim().parse::<$t>().unwrap())
@@ -11,7 +12,7 @@ struct Action {
     price: i32,
     repeatable: i32, // 1 if repeatable
     repeat: i32, // if cast, repeat instruction
-    used: i32
+    castable: i32 // 0 if castable cast
 }
 
 impl Action {
@@ -22,7 +23,7 @@ impl Action {
             price: 0, // if this is an order
             repeatable: 0, // if this is an order
             repeat: 1, // if this is a cast
-            used: 0 // if this is a cast
+            castable: 0 // if this is a cast
         }
     }
     fn from(id: i32, delta: [i32; 4]) -> Action {
@@ -32,7 +33,7 @@ impl Action {
             price: 0, // if this is an order
             repeatable: 0, // if this is an order
             repeat: 1, // if this is a cast
-            used: 0 // if this is a cast
+            castable: 0 // if this is a cast
         }
     }
 }
@@ -69,7 +70,7 @@ fn get_turn_informations() -> Game {
         action.price = parse_input!(inputs[6], i32); // the price in rupees if this is a potion
         let tome_index = parse_input!(inputs[7], i32); // the index in the tome if this is a tome spell, equal to the read-ahead tax
         let tax_count = parse_input!(inputs[8], i32); // the amount of taxed tier-0 ingredients you gain from learning this spell
-        action.used = parse_input!(inputs[9], i32); // 1 if this is a castable player spell
+        action.castable = parse_input!(inputs[9], i32); // 1 if this is a castable player spell
         action.repeatable = parse_input!(inputs[10], i32); // 1 if this is a repeatable player spell
         if action_type == "BREW" {
             orders.push(action);
@@ -125,47 +126,52 @@ fn get_possible_recipe(game: &Game) -> Vec<Action> {
     return possible_recipe;
 }
 
-fn get_possible_cast(game: &Game) -> Vec<Action> {
+fn get_possible_cast(state: [i32; 4], spells: &Vec<Action>, game: &Game) -> Vec<Action> {
     let mut possible_cast: Vec<Action> = Vec::new();
-    for spell in game.spells.iter() {
-        let mut repeat_count: i32 = 0;
-        loop {
-            repeat_count += 1;
-            let new_spell: Action = Action::from(spell.id, delta_mult(spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]));
-            let missing_table = delta_add(game.inventory, new_spell.delta);
-            // eprintln!("mt: {:?}", missing_table);
-            let mut sum: i32 = 0;
-            for el in delta_add(game.inventory, new_spell.delta).iter() {
-                sum += *el;
-            }
-            if sum <= 10 && spell.used == 1 && !missing_table.iter().any(|el| *el < 0) {
-                possible_cast.push(new_spell);
-                if spell.repeatable == 0 { break; }
-            } else {  break; }
-        }
-    }
-    for (i, book_spell) in game.book.iter().enumerate() {
-        // eprintln!("inv      : {:?}", game.inventory);
-        let theorical_inventory: [i32; 4] = delta_add(game.inventory.clone(), [-(i as i32), 0, 0, 0]);
-        if !theorical_inventory.iter().any(|el| *el < 0) {
+    for spell in spells.iter() {
+        if !game.book.iter().any(|learn| learn.id == spell.id) {
             let mut repeat_count: i32 = 0;
             loop {
                 repeat_count += 1;
-                let new_book_spell: Action = Action::from(book_spell.id, delta_mult(book_spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]));
-                // eprintln!("theorical: {:?}", theorical_inventory);
-                let missing_table = delta_add(theorical_inventory, new_book_spell.delta);
-                // eprintln!("new_book_spell: {} mt: {:?}", new_book_spell.id, missing_table);
-                let mut sum: i32 = 0; 
-                for el in delta_add(theorical_inventory, new_book_spell.delta).iter() {
+                let mut new_spell: Action = spell.clone();
+                new_spell.delta = delta_mult(spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]);
+                let missing_table = delta_add(state, new_spell.delta);
+                // eprintln!("mt: {:?}", missing_table);
+                let mut sum: i32 = 0;
+                for el in delta_add(state, new_spell.delta).iter() {
                     sum += *el;
                 }
-                if sum <= 10 && !missing_table.iter().any(|el| *el < 0) {
-                    possible_cast.push(new_book_spell);
-                    if book_spell.repeatable == 0 { break; }
+                if sum <= 10 && /*spell.castable == 1 &&*/ !missing_table.iter().any(|el| *el < 0) {
+                    possible_cast.push(new_spell);
+                    if spell.repeatable == 0 { break; }
                 } else {  break; }
+            }
+        } else {
+            // eprintln!("inv      : {:?}", state);
+            let learn_id: usize = game.book.iter().position(|&learn| learn.id == spell.id).unwrap_or(0);
+            let theorical_state: [i32; 4] = delta_add(state.clone(), [-(learn_id as i32), 0, 0, 0]);
+            if !theorical_state.iter().any(|el| *el < 0) {
+                let mut repeat_count: i32 = 0;
+                loop {
+                    repeat_count += 1;
+                    let mut new_spell: Action = spell.clone();
+                    new_spell.delta = delta_mult(spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]);
+                    // eprintln!("theorical: {:?}", theorical_state);
+                    let missing_table = delta_add(theorical_state, new_spell.delta);
+                    // eprintln!("new_spell: {} mt: {:?}", new_spell.id, missing_table);
+                    let mut sum: i32 = 0; 
+                    for el in delta_add(theorical_state, new_spell.delta).iter() {
+                        sum += *el;
+                    }
+                    if sum <= 10 && !missing_table.iter().any(|el| *el < 0) {
+                        possible_cast.push(new_spell);
+                        if spell.repeatable == 0 { break; }
+                    } else {  break; }
+                }
             }
         }
     }
+    // eprintln!("{:?}", possible_cast);
     return possible_cast;
 }
 
@@ -180,61 +186,94 @@ fn preparation_time_for(delta: [i32; 4], inventory: [i32; 4]) -> i32 {
     return time;
 }
 
-// fn graph_search(cast: Action, path: Vec<Action>, graph) -> bool {
-//     if !missing_element_table.iter().any(|&el| el < 0) {
-//         return true;
+// fn find_best_cast_for(order: Action, game: &Game) -> Action {
+//     let possible_cast: Vec<Action> = get_possible_cast(&game);
+//     eprint!("possible spells: ");
+//     for cast in possible_cast.iter() {
+//         eprint!("{}, ", cast.id);
 //     }
-//     for cast in game.spells {
-//         if graph_search(cast, visited, graph) == true {
-//             return true;
+//     eprintln!("");
+//     let mut best_spell: Action = Action::new();
+//     let mut best: i32 = preparation_time_for(order.delta, game.inventory);
+//     eprintln!("current time: {}", best);
+//     for spell in possible_cast.iter() {
+//         let mut casted_inventory = delta_add(game.inventory, spell.delta);
+//         let book_position = game.book.iter().position(|&learn| learn.id == spell.id);
+//         casted_inventory = delta_add(casted_inventory, [-(book_position.unwrap_or(0) as i32), 0, 0, 0]);
+//         // eprintln!("cast {} casted inv: {:?}", spell.id, casted_inventory);
+//         let mut time: i32 = preparation_time_for(order.delta, casted_inventory);
+//         if book_position.is_some() { time += 1; }
+//         // eprintln!("spell: {} time: {}", spell.id, time);
+//         if time <= best {
+//             best = time;
+//             best_spell = *spell;
 //         }
 //     }
-// }
-
-// fn find_fastest_preparation(order: Order, game: &Game) -> Vec<Action> {
-//     // let missing_element_table: [i32; 4] = delta_add(game.inventory.delta, order.delta);
-    
-//     let path: Vec<Action> = Vec::new();
-//     for cast in game.spells {
-//         if !visited.contains(cast) {
-//             path.push(cast);
-//             if graph_search(cast, path, graph) == true {
-//                 return nb_turn;
-//             }
-//             path.pop();
-//         }
+//     if best == preparation_time_for(order.delta, game.inventory) && !game.spells.iter().any(|spell| spell.castable == 1) {
+//         best_spell = Action::new();
 //     }
-//     return path;
+//     eprintln!("best_spell_id: {}", best_spell.id);
+//     return best_spell;
 // }
 
-fn find_best_cast_for(order: Action, game: &Game) -> Action {
-    let possible_cast: Vec<Action> = get_possible_cast(&game);
-    eprint!("possible spells: ");
-    for cast in possible_cast.iter() {
-        eprint!("{}, ", cast.id);
-    }
-    eprintln!("");
-    let mut best_spell: Action = Action::new();
-    let mut best: i32 = preparation_time_for(order.delta, game.inventory);
-    eprintln!("current time: {}", best);
-    for spell in possible_cast.iter() {
-        let mut casted_inventory = delta_add(game.inventory, spell.delta);
-        let book_position = game.book.iter().position(|&learn| learn.id == spell.id);
-        casted_inventory = delta_add(casted_inventory, [-(book_position.unwrap_or(0) as i32), 0, 0, 0]);
-        // eprintln!("cast {} casted inv: {:?}", spell.id, casted_inventory);
-        let mut time: i32 = preparation_time_for(order.delta, casted_inventory);
-        if book_position.is_some() { time += 1; }
-        // eprintln!("spell: {} time: {}", spell.id, time);
-        if time <= best {
-            best = time;
-            best_spell = *spell;
+// fn get_neighbors(state: [i32; 4], spells: Vec<Action>) -> Vec<[i32; 4]> {
+//     //
+// }
+
+fn is_solution(state: [i32; 4], game: &Game) -> bool {
+    for order in game.orders.iter() {
+        if !delta_add(state, order.delta).iter().any(|el| *el < 0) {
+            return true;
         }
     }
-    if best == preparation_time_for(order.delta, game.inventory) && !game.spells.iter().any(|spell| spell.used == 1) {
-        best_spell = Action::new();
+    return false;
+}
+
+fn graph_search(path: &mut Vec<Action>, state: [i32; 4], bound: i32, spells: &mut Vec<Action>, game: &Game) -> Option<Action> {
+    // if bound < 24 { eprintln!("spell: {} state: {:?}", path.last().unwrap().id, state); }
+    if is_solution(state, game) {
+        return Some(path[1]);
+    } else if path.len() > bound as usize {
+        return None;
     }
-    eprintln!("best_spell_id: {}", best_spell.id);
-    return best_spell;
+    let possible_cast = get_possible_cast(state, spells, game);
+    if bound <= 1 {
+        let mut possible_cast_list: Vec<i32> = Vec::new();
+        for el in possible_cast.iter() {
+            possible_cast_list.push(el.id);
+        }
+        eprintln!("possible_cast: {:?}", possible_cast_list);
+    }
+    for cast in possible_cast {
+        let neighbour = delta_add(cast.delta, state);
+        path.push(cast);
+        let spell_pos: usize = spells.iter().position(|&spell| spell.id == cast.id).unwrap() as usize;
+        spells[spell_pos].castable = 0;
+        let res = graph_search(path, neighbour, bound, spells, game);
+        if res.is_some() {
+            return res;
+        }
+        path.pop();
+    }
+    return None;
+}
+
+fn find_best_cast(game: &Game) -> Action {
+    let start_time = Instant::now();
+    let mut bound: i32 = 1;
+    loop {
+        let mut path: Vec<Action> = Vec::new();
+        path.push(Action::from(0, game.inventory.clone()));
+        let mut spells: Vec<Action> = [&game.spells[..], &game.book[..]].concat();
+        eprintln!("bound: {} duration: {:?}s ({:?})", bound, start_time.elapsed().as_secs(), start_time.elapsed());
+        // eprint!("path: "); for el in path.iter() { eprint!("{:?}, ", el.delta); } eprintln!("");
+        // eprint!("spells: "); for el in spells.iter() {  eprint!("{}, ", el.id); }  eprintln!("");
+        let res = graph_search(&mut path, game.inventory.clone(), bound, &mut spells, game);
+        if res.is_some() {
+            return res.unwrap();
+        }
+        bound += 1;
+    }
 }
 
 /* ------------------------------------------------------------ */
@@ -246,38 +285,45 @@ fn main() {
         let mut game: Game = get_turn_informations();
         let possible_recipe: Vec<Action> = get_possible_recipe(&game);
         if possible_recipe.is_empty() {
-            if game.spells.iter().any(|spell| spell.used == 1) {
-                let mut best_order: (Action, f64) = (Action::new(), 0.0);
+            if game.spells.iter().any(|spell| spell.castable == 1) {
+                /*let mut best_order: (Action, i32) = (Action::new(), std::i32::MAX);
                 for (i, order) in game.orders.iter().enumerate() {
                     let time: i32 = preparation_time_for(order.delta, game.inventory);
-                    let price = match i { // prendre en compte le fait que les bonus ne sont dispo que 4 fois
-                        0 => { order.price + 3 },
-                        1 => { order.price + 1 },
-                        _ => { order.price }
-                    };
-                    let ratio: f64 = price as f64 / time as f64;
+                    // let price = match i { // prendre en compte le fait que les bonus ne sont dispo que 4 fois
+                    //     0 => { order.price + 3 },
+                    //     1 => { order.price + 1 },
+                    //     _ => { order.price }
+                    // };
+                    // let ratio: f64 = price as f64 / time as f64;
                     // eprintln!("order: {} time: {} price {} ratio {}", order.id, time, price, ratio);
-                    if ratio > best_order.1 {
-                        best_order = (*order, ratio);
+                    if time < best_order.1 {
+                        best_order = (*order, time);
                     }
                     // let sequence: Vec<Action> = find_fastest_preparation(order, &game);
                     // if sequence.len() < best_order.1 {
                     //     best_order = (order, sequence.len());
                     // }
                 }
-                eprintln!("best ratio: {}", best_order.0.id);
-                let cast = find_best_cast_for(best_order.0, &game);
+                eprintln!("best time: {}", best_order.0.id);*/
+                let start_time = Instant::now();
+                let cast = find_best_cast(&game);
+                eprintln!("best cast: {}", cast.id);
+                eprintln!("graph search duration: {:?}", start_time.elapsed());
                 if cast.id != 0 {
                     if game.spells.iter().any(|spell| spell.id == cast.id) {
-                        println!("CAST {} {}", cast.id, cast.repeat);
+                        if cast.castable == 1 {
+                            println!("CAST {} {} {}", cast.id, cast.repeat, if cast.repeat > 1 { "R" } else { "" });
+                        } else {
+                            println!("REST A");
+                        }
                     } else {
                         println!("LEARN {}", cast.id);
                     }
                 } else {
-                    println!("REST");
+                    println!("REST B");
                 }
             } else {
-                println!("REST");
+                println!("REST C");
             }
         } else {
             let recipe_id: i32 = possible_recipe.iter().max_by_key(|order| order.price).unwrap().id;
@@ -285,4 +331,3 @@ fn main() {
         }
     }
 }
-
