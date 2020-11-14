@@ -135,6 +135,7 @@ fn get_possible_cast(state: [i32; 4], spells: &Vec<Action>, game: &Game) -> Vec<
                 repeat_count += 1;
                 let mut new_spell: Action = spell.clone();
                 new_spell.delta = delta_mult(spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]);
+                new_spell.repeat = repeat_count;
                 let missing_table = delta_add(state, new_spell.delta);
                 // eprintln!("mt: {:?}", missing_table);
                 let mut sum: i32 = 0;
@@ -156,6 +157,7 @@ fn get_possible_cast(state: [i32; 4], spells: &Vec<Action>, game: &Game) -> Vec<
                     repeat_count += 1;
                     let mut new_spell: Action = spell.clone();
                     new_spell.delta = delta_mult(spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]);
+                    new_spell.repeat = repeat_count;
                     // eprintln!("theorical: {:?}", theorical_state);
                     let missing_table = delta_add(theorical_state, new_spell.delta);
                     // eprintln!("new_spell: {} mt: {:?}", new_spell.id, missing_table);
