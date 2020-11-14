@@ -9,6 +9,8 @@ struct Action {
     id: i32,
     delta: [i32; 4],
     price: i32,
+    repeatable: i32, // 1 if repeatable
+    repeat: i32, // if cast, repeat instruction
     used: i32
 }
 
@@ -18,6 +20,18 @@ impl Action {
             id: 0,
             delta: [0, 0, 0, 0],
             price: 0, // if this is an order
+            repeatable: 0, // if this is an order
+            repeat: 1, // if this is a cast
+            used: 0 // if this is a cast
+        }
+    }
+    fn from(id: i32, delta: [i32; 4]) -> Action {
+        return Action {
+            id: id,
+            delta: delta,
+            price: 0, // if this is an order
+            repeatable: 0, // if this is an order
+            repeat: 1, // if this is a cast
             used: 0 // if this is a cast
         }
     }
@@ -47,16 +61,16 @@ fn get_turn_informations() -> Game {
         io::stdin().read_line(&mut input_line).unwrap();
         let inputs = input_line.split(" ").collect::<Vec<_>>();
         action.id = parse_input!(inputs[0], i32); // the unique ID of this spell or recipe
-        let action_type = inputs[1].trim().to_string(); // in the first league: BREW; later: CAST, OPPONENT_CAST, LEARN, BREW
+        let action_type = inputs[1].trim().to_string(); // later: CAST, OPPONENT_CAST, LEARN, BREW
         action.delta[0] = parse_input!(inputs[2], i32); // tier-0 ingredient change
         action.delta[1]= parse_input!(inputs[3], i32); // tier-1 ingredient change
         action.delta[2] = parse_input!(inputs[4], i32); // tier-2 ingredient change
         action.delta[3] = parse_input!(inputs[5], i32); // tier-3 ingredient change
         action.price = parse_input!(inputs[6], i32); // the price in rupees if this is a potion
-        let tome_index = parse_input!(inputs[7], i32); // in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax
-        let tax_count = parse_input!(inputs[8], i32); // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
-        action.used = parse_input!(inputs[9], i32); // in the first league: always 0; later: 1 if this is a castable player spell
-        let repeatable = parse_input!(inputs[10], i32); // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
+        let tome_index = parse_input!(inputs[7], i32); // the index in the tome if this is a tome spell, equal to the read-ahead tax
+        let tax_count = parse_input!(inputs[8], i32); // the amount of taxed tier-0 ingredients you gain from learning this spell
+        action.used = parse_input!(inputs[9], i32); // 1 if this is a castable player spell
+        action.repeatable = parse_input!(inputs[10], i32); // 1 if this is a repeatable player spell
         if action_type == "BREW" {
             orders.push(action);
         } else if action_type == "CAST" {
@@ -71,7 +85,7 @@ fn get_turn_informations() -> Game {
         io::stdin().read_line(&mut input_line).unwrap();
         let inputs = input_line.split(" ").collect::<Vec<_>>();
         if i == 0 {
-            inventory[0] = parse_input!(inputs[0], i32); // tier-0 ingredients in inventory
+            inventory[0] = parse_input!(inputs[0], i32);
             inventory[1] = parse_input!(inputs[1], i32);
             inventory[2] = parse_input!(inputs[2], i32);
             inventory[3] = parse_input!(inputs[3], i32);
@@ -94,6 +108,10 @@ fn delta_add(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
     return [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
 }
 
+fn delta_mult(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
+    return [a[0] * b[0], a[1] * b[1], a[2] * b[2], a[3] * b[3]];
+}
+
 fn get_possible_recipe(game: &Game) -> Vec<Action> {
     let mut possible_recipe: Vec<Action> = Vec::new();
     for order in game.orders.iter() {
@@ -110,29 +128,41 @@ fn get_possible_recipe(game: &Game) -> Vec<Action> {
 fn get_possible_cast(game: &Game) -> Vec<Action> {
     let mut possible_cast: Vec<Action> = Vec::new();
     for spell in game.spells.iter() {
-        let missing_table = delta_add(game.inventory, spell.delta);
-        // eprintln!("mt: {:?}", missing_table);
-        let mut sum: i32 = 0;
-        for el in delta_add(game.inventory, spell.delta).iter() {
-            sum += *el;
-        }
-        if sum <= 10 && spell.used == 1 && !missing_table.iter().any(|el| *el < 0) {
-            possible_cast.push(*spell);
+        let mut repeat_count: i32 = 0;
+        loop {
+            repeat_count += 1;
+            let new_spell: Action = Action::from(spell.id, delta_mult(spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]));
+            let missing_table = delta_add(game.inventory, new_spell.delta);
+            // eprintln!("mt: {:?}", missing_table);
+            let mut sum: i32 = 0;
+            for el in delta_add(game.inventory, new_spell.delta).iter() {
+                sum += *el;
+            }
+            if sum <= 10 && spell.used == 1 && !missing_table.iter().any(|el| *el < 0) {
+                possible_cast.push(new_spell);
+                if spell.repeatable == 0 { break; }
+            } else {  break; }
         }
     }
     for (i, book_spell) in game.book.iter().enumerate() {
-        eprintln!("inv      : {:?}", game.inventory);
+        // eprintln!("inv      : {:?}", game.inventory);
         let theorical_inventory: [i32; 4] = delta_add(game.inventory.clone(), [-(i as i32), 0, 0, 0]);
         if !theorical_inventory.iter().any(|el| *el < 0) {
-            eprintln!("theorical: {:?}", theorical_inventory);
-            let missing_table = delta_add(theorical_inventory, book_spell.delta);
-            eprintln!("book_spell: {} mt: {:?}", book_spell.id, missing_table);
-            let mut sum: i32 = 0; 
-            for el in delta_add(theorical_inventory, book_spell.delta).iter() {
-                sum += *el;
-            }
-            if sum <= 10 && !missing_table.iter().any(|el| *el < 0) {
-                possible_cast.push(*book_spell);
+            let mut repeat_count: i32 = 0;
+            loop {
+                repeat_count += 1;
+                let new_book_spell: Action = Action::from(book_spell.id, delta_mult(book_spell.delta, [repeat_count, repeat_count, repeat_count, repeat_count]));
+                // eprintln!("theorical: {:?}", theorical_inventory);
+                let missing_table = delta_add(theorical_inventory, new_book_spell.delta);
+                // eprintln!("new_book_spell: {} mt: {:?}", new_book_spell.id, missing_table);
+                let mut sum: i32 = 0; 
+                for el in delta_add(theorical_inventory, new_book_spell.delta).iter() {
+                    sum += *el;
+                }
+                if sum <= 10 && !missing_table.iter().any(|el| *el < 0) {
+                    possible_cast.push(new_book_spell);
+                    if book_spell.repeatable == 0 { break; }
+                } else {  break; }
             }
         }
     }
@@ -177,37 +207,34 @@ fn preparation_time_for(delta: [i32; 4], inventory: [i32; 4]) -> i32 {
 //     return path;
 // }
 
-fn find_best_cast_for(order: Action, game: &Game) -> i32 {
+fn find_best_cast_for(order: Action, game: &Game) -> Action {
     let possible_cast: Vec<Action> = get_possible_cast(&game);
     eprint!("possible spells: ");
     for cast in possible_cast.iter() {
         eprint!("{}, ", cast.id);
     }
     eprintln!("");
-    let mut best_spell_id: i32 = 0;
+    let mut best_spell: Action = Action::new();
     let mut best: i32 = preparation_time_for(order.delta, game.inventory);
     eprintln!("current time: {}", best);
     for spell in possible_cast.iter() {
         let mut casted_inventory = delta_add(game.inventory, spell.delta);
         let book_position = game.book.iter().position(|&learn| learn.id == spell.id);
-        let mut time: i32 = 0;
-        if book_position.is_some() {
-            casted_inventory = delta_add(casted_inventory, [-(book_position.unwrap() as i32), 0, 0, 0]);
-            time += 1;
-        }
+        casted_inventory = delta_add(casted_inventory, [-(book_position.unwrap_or(0) as i32), 0, 0, 0]);
         // eprintln!("cast {} casted inv: {:?}", spell.id, casted_inventory);
-       time += preparation_time_for(order.delta, casted_inventory);
-        eprintln!("spell: {} time: {}", spell.id, time);
+        let mut time: i32 = preparation_time_for(order.delta, casted_inventory);
+        if book_position.is_some() { time += 1; }
+        // eprintln!("spell: {} time: {}", spell.id, time);
         if time <= best {
             best = time;
-            best_spell_id = spell.id;
+            best_spell = *spell;
         }
     }
     if best == preparation_time_for(order.delta, game.inventory) && !game.spells.iter().any(|spell| spell.used == 1) {
-        best_spell_id = 0;
+        best_spell = Action::new();
     }
-    eprintln!("best_spell_id: {}", best_spell_id);
-    return best_spell_id;
+    eprintln!("best_spell_id: {}", best_spell.id);
+    return best_spell;
 }
 
 /* ------------------------------------------------------------ */
@@ -239,12 +266,12 @@ fn main() {
                     // }
                 }
                 eprintln!("best ratio: {}", best_order.0.id);
-                let cast_id = find_best_cast_for(best_order.0, &game);
-                if cast_id != 0 {
-                    if game.spells.iter().any(|spell| spell.id == cast_id) {
-                        println!("CAST {}", cast_id);
+                let cast = find_best_cast_for(best_order.0, &game);
+                if cast.id != 0 {
+                    if game.spells.iter().any(|spell| spell.id == cast.id) {
+                        println!("CAST {} {}", cast.id, cast.repeat);
                     } else {
-                        println!("LEARN {}", cast_id);
+                        println!("LEARN {}", cast.id);
                     }
                 } else {
                     println!("REST");
