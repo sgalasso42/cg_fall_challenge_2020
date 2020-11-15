@@ -10,7 +10,7 @@ struct Action {
     id: i32,
     action: String,
     delta: [i32; 4],
-    price: i32,
+    price: i32, // if order
     tax: i32, // if learn
     pocket: i32, // if learn, nb of type0 stored by tax
     repeatable: i32, // 1 if repeatable
@@ -161,12 +161,13 @@ fn get_available_learns(state: [i32; 4], book: &Vec<Action>) -> Vec<Action> {
     let mut possible_learn: Vec<Action> = Vec::new();
     for learn in book.iter() {
         let missing_table: [i32; 4] = delta_add(state, [-learn.tax, 0, 0, 0]);
+        let simulated_missing_table = delta_add(missing_table, learn.delta);
         // eprintln!("mt: {:?}", missing_table);
         let mut sum: i32 = 0;
         for el in missing_table.iter() {
             sum += *el;
         }
-        if sum <= 10 && !missing_table.iter().any(|el| *el < 0) {
+        if sum <= 10 && !missing_table.iter().any(|el| *el < 0) && !simulated_missing_table.iter().any(|el| *el < 0) {
             possible_learn.push(learn.clone());
         }
     }
@@ -174,15 +175,26 @@ fn get_available_learns(state: [i32; 4], book: &Vec<Action>) -> Vec<Action> {
     return possible_learn;
 }
 
-fn graph_search(path: &mut Vec<Action>, state: [i32; 4], bound: i32, spells: &mut Vec<Action>, book: &mut Vec<Action>, game: &Game) -> Option<Action> {
+/*fn heuristic() {
+
+}*/
+
+fn graph_search(path: &mut Vec<Action>, state: [i32; 4], bound: i32, spells: &mut Vec<Action>, book: &mut Vec<Action>, game: &Game, explored_nodes: &mut i32) -> Option<i32> {
+    *explored_nodes += 1;
+    let f = (path.len() - 1) /*+ heuristic()*/;
     if !find_solutions(state, game).is_empty() {
-        return Some(path[1].clone());
-    } else if path.len() > bound as usize {
         return None;
+    } else if f > bound as usize {
+        return Some(f as i32);
     }
     let available_spells: Vec<Action> = get_available_spells(state, spells);
     let available_learns: Vec<Action> = get_available_learns(state, book);
-    let neighbors: Vec<Action> = [&available_spells[..], &available_learns[..], &[Action::new(String::from("REST"))]].concat();
+    let mut neighbors: Vec<Action> = [&available_spells[..], &available_learns[..]].concat();
+    if spells.iter().any(|spell| spell.castable == 0) {
+        neighbors.push(Action::new(String::from("REST")));
+    }
+    // eprint!("neighbors: "); for el in neighbors.iter() { eprint!("{}, ", el.id); } eprintln!("");
+    let mut min: i32 = std::i32::MAX;
     for action in neighbors.iter() {
         path.push(action.clone());
         let mut neighbour: [i32; 4] = state.clone();
@@ -197,10 +209,6 @@ fn graph_search(path: &mut Vec<Action>, state: [i32; 4], bound: i32, spells: &mu
             "LEARN" => {
                 let mut new_state: [i32; 4] = delta_add(state, [action.pocket, 0, 0, 0]);
                 new_state = delta_add(new_state, [-action.tax, 0, 0, 0]);
-                if new_book.iter().position(|i| i.id == action.id).is_none() {
-                    eprintln!("FUCK B: {:?}\n{}", available_learns, action.id);
-                    panic!("FUCK B");
-                }
                 new_spells.retain(|spell| spell.id != action.id);
                 new_spells.push(action.clone());
                 neighbour = new_state;
@@ -212,32 +220,38 @@ fn graph_search(path: &mut Vec<Action>, state: [i32; 4], bound: i32, spells: &mu
             },
             _ => {}
         };
-        let res = graph_search(path, neighbour, bound, &mut new_spells, &mut new_book, game);
-        if res.is_some() {
-            return res;
+        let res = graph_search(path, neighbour, bound, &mut new_spells, &mut new_book, game, explored_nodes);
+        if res.is_none() {
+            return None;
+        }
+        let unwrapped: i32 = res.unwrap();
+        if unwrapped < min {
+            min = unwrapped;
         }
         path.pop();
     }
-    return None;
+    return Some(min as i32);
 }
 
 fn find_best_action(game: &Game) -> Action {
     let start_time = Instant::now();
-    let mut bound: i32 = 1;
+    let mut bound: i32 = 0;
     loop {
+        let mut explored_nodes: i32 = 0;
         let mut path: Vec<Action> = Vec::new();
         path.push(Action::from(0, String::from("CAST"), game.inventory.clone()));
         let mut spells: Vec<Action> = game.spells.clone();
         let mut book: Vec<Action> = game.book.clone();
-        eprintln!("# bound: {} duration: {:?}", bound, start_time.elapsed());
         // eprint!("path: "); for el in path.iter() { eprint!("{:?}, ", el.delta); } eprintln!("");
         // eprint!("spells: "); for el in spells.iter() {  eprint!("{}, ", el.id); }  eprintln!("");
         // eprint!("book: "); for el in book.iter() {  eprint!("{}, ", el.id); }  eprintln!("");
-        let res = graph_search(&mut path, game.inventory.clone(), bound, &mut spells, &mut book, game);
-        if res.is_some() {
-            return res.unwrap();
+        let res = graph_search(&mut path, game.inventory.clone(), bound, &mut spells, &mut book, game, &mut explored_nodes);
+        eprintln!("# bound: {} explored: {} time: {:?}", bound, explored_nodes, start_time.elapsed());
+        // eprintln!("{:?}", res);
+        if res.is_none() {
+            return path[1].clone();
         }
-        bound += 1;
+        bound = res.unwrap();
     }
 }
 
@@ -250,32 +264,11 @@ fn main() {
         let mut game: Game = get_turn_informations();
         let possible_recipe: Vec<Action> = find_solutions(game.inventory, &game);
         if possible_recipe.is_empty() {
-            // if game.spells.iter().any(|spell| spell.castable == 1) {
-            //     let start_time = Instant::now();
-            //     let cast = find_best_cast(&game);
-            //     eprintln!("best cast: {}", cast.id);
-            //     eprintln!("graph search duration: {:?}", start_time.elapsed());
-            //     if cast.id != 0 {
-            //         if game.spells.iter().any(|spell| spell.id == cast.id) {
-            //             if cast.castable == 1 {
-            //                 println!("CAST {} {} {}", cast.id, cast.repeat, if cast.repeat > 1 { "R" } else { "" });
-            //             } else {
-            //                 println!("REST A");
-            //             }
-            //         } else {
-            //             println!("LEARN {}", cast.id);
-            //         }
-            //     } else {
-            //         println!("REST B");
-            //     }
-            // } else {
-            //     println!("REST C");
-            // }
             let start_time = Instant::now();
             let action = find_best_action(&game);
             eprintln!("best action: {:?}", action);
             eprintln!("graph search duration: {:?}", start_time.elapsed());
-            println!("{} {} {}", action.action, action.repeat, if action.repeat > 1 { "R" } else { "" });
+            println!("{} {} {} {}", action.action, action.id, action.repeat, if action.repeat > 1 { "R" } else { "" });
         } else {
             let recipe_id: i32 = possible_recipe.iter().max_by_key(|order| order.price).unwrap().id;
             println!("BREW {}", recipe_id);
