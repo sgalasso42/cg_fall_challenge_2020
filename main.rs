@@ -158,7 +158,7 @@ fn get_available_spells(state: [i32; 4], spells: &Vec<Action>) -> Vec<Action> {
             }
         }
     }
-    // eprintln!("possible_cast: {:?}", possible_cast);
+    // eprint!("possible_cast: "); for el in possible_cast.iter() { eprint!("{}, ", el.id); } eprintln!("");
     return possible_cast;
 }
 
@@ -177,7 +177,7 @@ fn get_available_learns(state: [i32; 4], book: &Vec<Action>) -> Vec<Action> {
             }
         }
     }
-    // eprintln!("possible_learn: {:?}", possible_learn);
+    // eprint!("possible_learn: "); for el in possible_learn.iter() { eprint!("{}, ", el.id); } eprintln!("");
     return possible_learn;
 }
 
@@ -198,7 +198,10 @@ fn simulate(action: &Action, state: [i32; 4], game: &Game) -> ([i32; 4], Game) {
             let mut new_state: [i32; 4] = delta_add(state, [action.pocket, 0, 0, 0]);
             new_state = delta_add(new_state, [-action.tax, 0, 0, 0]);
             game_simulation.book.retain(|spell| spell.id != action.id);
-            game_simulation.spells.push(action.clone());
+            let mut new_spell = action.clone();
+            new_spell.action = String::from("CAST");
+            new_spell.castable = 1;
+            game_simulation.spells.push(new_spell);
             neighbour = new_state;
         },
         "REST" => {
@@ -216,7 +219,7 @@ fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, 
     let f = cost /*+ heuristic()*/;
     let solutions = find_solutions(state, game_simulation);
     if !solutions.is_empty() {
-        // eprint!("found lvl: {} for : ", cost); for el in solutions.iter() { eprint!("{} ({}), ", el.id, el.price); } eprintln!("");
+        // eprint!("[!] found depth: {} for: ", cost - 1); for el in solutions.iter() { eprint!("{} price: {}, ", el.id, el.price); } eprintln!("");
         return Err(solutions.iter().max_by_key(|solution| solution.price).unwrap().price);
     } else if f > bound {
         return Ok(f);
@@ -225,11 +228,10 @@ fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, 
     if game_simulation.spells.iter().any(|spell| spell.castable == 0) {
         neighbors.push(Action::new(String::from("REST")));
     }
-    // eprint!("neighbors: "); for el in neighbors.iter() { eprint!("{}, ", el.id); } eprintln!("");
     let mut min: i32 = std::i32::MAX;
     for action in neighbors.iter() {
         if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
-            eprintln!("timeout at: {:.3?}", start_time.elapsed());
+            // eprintln!("timeout at: {:.3?}", start_time.elapsed());
             return Err(-1);
         }
         let simulation: ([i32; 4], Game) = simulate(action, state, game_simulation);
@@ -249,6 +251,7 @@ fn find_best_action(game: &Game) -> (Action, String) {
     let start_time: std::time::Instant = Instant::now();
     let mut bound: i32 = 0;
     loop {
+        // eprintln!(">> new bound: {}", bound);
         let mut explored_nodes: i32 = 0;
         let state: [i32; 4] = game.inventory.clone();
         let mut neighbors: Vec<Action> = [&get_available_spells(state, &game.spells)[..], &get_available_learns(state, &game.book)[..]].concat();
@@ -256,24 +259,27 @@ fn find_best_action(game: &Game) -> (Action, String) {
             neighbors.push(Action::new(String::from("REST")));
         }
         let mut min: i32 = std::i32::MAX;
+        let mut best_score: i32 = 0;
         let mut solution: Option<Action> = None;
-        let mut first_action: Action = Action::new(String::from("CAST"));
         for action in neighbors.iter() {
-            // eprintln!("try action: {}", action.id);
             let simulation: ([i32; 4], Game) = simulate(action, state, game);
             match graph_search(simulation.0, 1, bound, &simulation.1, &mut explored_nodes, start_time) {
                 Err(res) => {
                     if res < 0 {
-                        eprintln!("# last bound: {} explored: {} time: {:.3?}", bound, explored_nodes, start_time.elapsed());
+                        if solution.is_some() {
+                            break ;
+                        }
+                        // eprintln!("# last: {} explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
                         return (game.book[0].clone(), String::from("T"));
-                    } else {
+                    } else if res > best_score {
+                        best_score = res;
                         solution = Some(action.clone());
                     }
                 },
                 Ok(res) => { min = res; }
             }
         }
-        eprintln!("# bound: {} explored: {} time: {:.3?}", bound, explored_nodes, start_time.elapsed());
+        // eprintln!("== explored: {} time: {:.3?}\n---------------", explored_nodes, start_time.elapsed());
         if solution.is_some() {
             return (solution.unwrap(), String::from("F"));
         }
@@ -295,7 +301,7 @@ fn main() {
         if possible_recipe.is_empty() {
             let start_time = Instant::now();
             let action: (Action, String) = find_best_action(&game);
-            eprintln!("graph search duration: {:.3?}", start_time.elapsed());
+            // eprintln!("graph search duration: {:.3?}", start_time.elapsed());
             println!("{} {} {} {} {}", action.0.action, action.0.id, action.0.repeat, action.1, if action.0.repeat > 1 { "R" } else { "" });
         } else {
             let recipe_id: i32 = possible_recipe.iter().max_by_key(|order| order.price).unwrap().id;
@@ -303,3 +309,4 @@ fn main() {
         }
     }
 }
+
