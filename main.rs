@@ -198,6 +198,9 @@ fn simulate(action: &Action, state: [i32; 4], game: &Game) -> ([i32; 4], Game) {
             let mut new_state: [i32; 4] = delta_add(state, [action.pocket, 0, 0, 0]);
             new_state = delta_add(new_state, [-action.tax, 0, 0, 0]);
             game_simulation.book.retain(|spell| spell.id != action.id);
+            for learn in game_simulation.book.iter_mut() {
+                learn.tax -= 1;
+            }
             let mut new_spell = action.clone();
             new_spell.action = String::from("CAST");
             new_spell.castable = 1;
@@ -214,12 +217,13 @@ fn simulate(action: &Action, state: [i32; 4], game: &Game) -> ([i32; 4], Game) {
     return (neighbour, game_simulation)
 }
 
-fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, explored_nodes: &mut i32, start_time: std::time::Instant) -> Result<i32, i32> {
+fn graph_search(/*debug_path: &mut Vec<Action>, */state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, explored_nodes: &mut i32, start_time: std::time::Instant) -> Result<i32, i32> {
     *explored_nodes += 1;
     let f = cost /*+ heuristic()*/;
     let solutions = find_solutions(state, game_simulation);
     if !solutions.is_empty() {
         // eprint!("[!] found depth: {} for: ", cost - 1); for el in solutions.iter() { eprint!("{} price: {}, ", el.id, el.price); } eprintln!("");
+        // eprint!("path: "); for el in debug_path.iter() { eprint!("{}, ", el.id); } eprintln!("");
         return Err(solutions.iter().max_by_key(|solution| solution.price).unwrap().price);
     } else if f > bound {
         return Ok(f);
@@ -230,12 +234,13 @@ fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, 
     }
     let mut min: i32 = std::i32::MAX;
     for action in neighbors.iter() {
+        // debug_path.push(action.clone());
         if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
             // eprintln!("timeout at: {:.3?}", start_time.elapsed());
             return Err(-1);
         }
         let simulation: ([i32; 4], Game) = simulate(action, state, game_simulation);
-        match graph_search(simulation.0, cost + 1, bound, &simulation.1, explored_nodes, start_time) {
+        match graph_search(/*debug_path, */simulation.0, cost + 1, bound, &simulation.1, explored_nodes, start_time) {
             Err(res) => return Err(res),
             Ok(res) => {
                 if res < min {
@@ -243,6 +248,7 @@ fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, 
                 }
             }
         }
+        // debug_path.pop();
     }
     return Ok(min);
 }
@@ -262,15 +268,19 @@ fn find_best_action(game: &Game) -> (Action, String) {
         let mut best_score: i32 = 0;
         let mut solution: Option<Action> = None;
         for action in neighbors.iter() {
+            // let mut debug_path: Vec<Action> = Vec::new();
+            // debug_path.push(action.clone());
             let simulation: ([i32; 4], Game) = simulate(action, state, game);
-            match graph_search(simulation.0, 1, bound, &simulation.1, &mut explored_nodes, start_time) {
+            match graph_search(/*&mut debug_path, */simulation.0, 1, bound, &simulation.1, &mut explored_nodes, start_time) {
                 Err(res) => {
                     if res < 0 {
                         if solution.is_some() {
                             break ;
                         }
-                        // eprintln!("# last: {} explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
+                        // eprintln!("# last explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
                         return (game.book[0].clone(), String::from("T"));
+                    } else if res == best_score && &(solution.as_ref().unwrap().action)[..] == "CAST" && &(action.action)[..] == "LEARN" {
+                        solution = Some(action.clone());
                     } else if res > best_score {
                         best_score = res;
                         solution = Some(action.clone());
@@ -278,6 +288,7 @@ fn find_best_action(game: &Game) -> (Action, String) {
                 },
                 Ok(res) => { min = res; }
             }
+            /*debug_path.pop();*/
         }
         // eprintln!("== explored: {} time: {:.3?}\n---------------", explored_nodes, start_time.elapsed());
         if solution.is_some() {
