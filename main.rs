@@ -49,6 +49,7 @@ impl Action {
 
 #[derive(Clone, Debug)]
 struct Game {
+    turn: i32,
     inventory: [i32; 4],
     spells: Vec<Action>,
     book: Vec<Action>,
@@ -59,7 +60,7 @@ struct Game {
 /* - Parsing -------------------------------------------------- */
 /* ------------------------------------------------------------ */
 
-fn get_turn_informations() -> Game {
+fn get_turn_informations(turn: i32) -> Game {
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
     let action_count = parse_input!(input_line, i32); // the number of spells and recipes in play
@@ -103,6 +104,7 @@ fn get_turn_informations() -> Game {
         let score = parse_input!(inputs[4], i32); // amount of rupees
     }
     return Game {
+        turn: turn,
         inventory: inventory,
         spells: spells,
         book: book,
@@ -210,9 +212,6 @@ fn simulate(action: &Action, state: [i32; 4], game: &Game) -> ([i32; 4], Game) {
 }
 
 fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, explored_nodes: &mut i32, start_time: std::time::Instant) -> Result<i32, i32> {
-    if start_time.elapsed().as_millis() > 48 {
-        return Err(-1);
-    }
     *explored_nodes += 1;
     let f = cost /*+ heuristic()*/;
     let solutions = find_solutions(state, game_simulation);
@@ -229,10 +228,18 @@ fn graph_search(state: [i32; 4], cost: i32, bound: i32, game_simulation: &Game, 
     // eprint!("neighbors: "); for el in neighbors.iter() { eprint!("{}, ", el.id); } eprintln!("");
     let mut min: i32 = std::i32::MAX;
     for action in neighbors.iter() {
+        if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
+            eprintln!("timeout at: {:.3?}", start_time.elapsed());
+            return Err(-1);
+        }
         let simulation: ([i32; 4], Game) = simulate(action, state, game_simulation);
         match graph_search(simulation.0, cost + 1, bound, &simulation.1, explored_nodes, start_time) {
             Err(res) => return Err(res),
-            Ok(res) => { min = res; }
+            Ok(res) => {
+                if res < min {
+                    min = res;
+                }
+            }
         }
     }
     return Ok(min);
@@ -257,6 +264,7 @@ fn find_best_action(game: &Game) -> (Action, String) {
             match graph_search(simulation.0, 1, bound, &simulation.1, &mut explored_nodes, start_time) {
                 Err(res) => {
                     if res < 0 {
+                        eprintln!("# last bound: {} explored: {} time: {:.3?}", bound, explored_nodes, start_time.elapsed());
                         return (game.book[0].clone(), String::from("T"));
                     } else {
                         solution = Some(action.clone());
@@ -279,8 +287,10 @@ fn find_best_action(game: &Game) -> (Action, String) {
 /* ------------------------------------------------------------ */
 
 fn main() {
+    let mut turn: i32 = 0;
     loop {
-        let mut game: Game = get_turn_informations();
+        turn += 1;
+        let mut game: Game = get_turn_informations(turn);
         let possible_recipe: Vec<Action> = find_solutions(game.inventory, &game);
         if possible_recipe.is_empty() {
             let start_time = Instant::now();
