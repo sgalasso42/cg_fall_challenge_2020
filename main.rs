@@ -32,19 +32,6 @@ impl Action {
             castable: 0
         }
     }
-    fn from(id: i32, action: String, delta: [i8; 4]) -> Action {
-        return Action {
-            id: id,
-            action: action,
-            delta: delta,
-            price: 0,
-            tax: 0,
-            pocket: 0,
-            repeatable: 0,
-            repeat: 1,
-            castable: 0
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -156,8 +143,7 @@ fn get_available_learns(state: [i8; 4], book: &Vec<Action>) -> Vec<Action> {
     for learn in book.iter() { // take pocket content -> learn spell -> pay tax
         let simulated_state: [i8; 4] = delta_add(state, [learn.pocket, 0, 0, 0]);
         if simulated_state.iter().sum::<i8>() <= 10 {
-            let missing_table: [i8; 4] = delta_add(simulated_state, [-learn.tax, 0, 0, 0]);
-            if !missing_table.iter().any(|el| *el < 0) {
+            if !delta_add(simulated_state, [-learn.tax, 0, 0, 0]).iter().any(|el| *el < 0) {
                 possible_learn.push(learn.clone());
             }
         }
@@ -201,84 +187,67 @@ fn simulate(action: &Action, state: [i8; 4], game: &Game) -> ([i8; 4], Game) {
     return (neighbour, game_simulation)
 }
 
-fn graph_search(/*debug_path: &mut Vec<Action>, */state: [i8; 4], cost: i32, bound: i32, game_simulation: &Game, explored_nodes: &mut i32, start_time: std::time::Instant) -> Result<i32, i8> {
+fn graph_search(solution: &mut Option<(Vec<Action>, i8)>, path: &mut Vec<Action>, state: [i8; 4], bound: i8, game_simulation: &Game, explored_nodes: &mut usize, start_time: std::time::Instant) -> i8 {
     *explored_nodes += 1;
-    let f = cost /*+ heuristic()*/;
-    match &find_solutions(state, game_simulation)[..] {
-        solutions if !solutions.is_empty() => {
-            // eprint!("[!] found depth: {} for: ", cost - 1); for el in solutions.iter() { eprint!("{} price: {}, ", el.id, el.price); } eprintln!("");
-            // eprint!("path: "); for el in debug_path.iter() { eprint!("{}, ", el.id); } eprintln!("");
-            return Err(solutions.iter().max_by_key(|solution| solution.price).unwrap().price);
-        },
-        solutions if f > bound => { return Ok(f); },
-        _ => {}
+    let found_solutions = find_solutions(state, game_simulation);
+    if !found_solutions.is_empty() {
+        let found_solution = found_solutions.iter().max_by_key(|solution| solution.price).unwrap();
+        if solution.is_none() || (found_solution.price > solution.as_ref().unwrap().1) || (found_solution.price == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(found_solution.action)[..] == "LEARN") {
+            // eprint!("[!] found depth: {} for: ", path.len() - 1); for el in found_solutions.iter() { eprint!("{} price: {}, ", el.id, el.price); } eprintln!("");
+            // eprint!("path: "); for el in path.iter() { eprint!("{}, ", el.id); } eprintln!("");
+            *solution = Some((path.clone(), found_solution.price));
+        }
+    }
+    let f = path.len() /*+ heuristic()*/;
+    if f > bound as usize {
+        return f as i8;
     }
     let mut neighbors: Vec<Action> = [&get_available_spells(state, &game_simulation.spells)[..], &get_available_learns(state, &game_simulation.book)[..]].concat();
     if game_simulation.spells.iter().any(|spell| spell.castable == 0) {
         neighbors.push(Action::new(String::from("REST")));
     }
-    let mut min: i32 = std::i32::MAX;
+    let mut min: i8 = std::i8::MAX;
     for action in neighbors.iter() {
-        // debug_path.push(action.clone());
+        path.push(action.clone());
         if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
             // eprintln!("timeout at: {:.3?}", start_time.elapsed());
-            return Err(-1);
+            return -1;
         }
         let simulation: ([i8; 4], Game) = simulate(action, state, game_simulation);
-        match graph_search(/*debug_path, */simulation.0, cost + 1, bound, &simulation.1, explored_nodes, start_time) {
-            Err(res) => return Err(res),
-            Ok(res) if res < min => {
+        match graph_search(solution, path, simulation.0, bound, &simulation.1, explored_nodes, start_time) {
+            -1 => return -1,
+            res if res < min => {
                 min = res;
             },
             _ => {}
         }
-        // debug_path.pop();
+        path.pop();
     }
-    return Ok(min);
+    return min;
 }
 
 fn find_best_action(game: &Game) -> (Action, String) {
     let start_time: std::time::Instant = Instant::now();
-    let mut bound: i32 = 0;
+    let mut bound: i8 = 0;
     loop {
         // eprintln!(">> new bound: {}", bound);
-        let mut explored_nodes: i32 = 0;
-        let state: [i8; 4] = game.inventory.clone();
-        let mut neighbors: Vec<Action> = [&get_available_spells(state, &game.spells)[..], &get_available_learns(state, &game.book)[..]].concat();
-        if game.spells.iter().any(|spell| spell.castable == 0) {
-            neighbors.push(Action::new(String::from("REST")));
-        }
-        let mut min: i32 = std::i32::MAX;
-        let mut best_score: i8 = 0;
-        let mut solution: Option<Action> = None;
-        for action in neighbors.iter() {
-            // let mut debug_path: Vec<Action> = Vec::new();
-            // debug_path.push(action.clone());
-            let simulation: ([i8; 4], Game) = simulate(action, state, game);
-            match graph_search(/*&mut debug_path, */simulation.0, 1, bound, &simulation.1, &mut explored_nodes, start_time) {
-                Err(res) => {
-                    if res < 0 {
-                        if solution.is_some() {
-                            break ;
-                        }
-                        // eprintln!("# last explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
-                        return (game.book[0].clone(), String::from("T"));
-                    } else if res == best_score && &(solution.as_ref().unwrap().action)[..] == "CAST" && &(action.action)[..] == "LEARN" {
-                        solution = Some(action.clone());
-                    } else if res > best_score {
-                        best_score = res;
-                        solution = Some(action.clone());
-                    }
-                },
-                Ok(res) => { min = res; }
+        let mut explored_nodes: usize = 0;
+        let mut path: Vec<Action> = Vec::new();
+        let mut solution: Option<(Vec<Action>, i8)> = None;
+        match graph_search(&mut solution, &mut path, game.inventory.clone(), bound, &mut game.clone(), &mut explored_nodes, start_time) {
+            _ if solution.is_some() => {
+                // eprintln!("# last explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
+                return (solution.unwrap().0.first().unwrap().clone(), String::from("F"));
+            },
+            -1 => {
+                // eprintln!("# last explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
+                return (game.book[0].clone(), String::from("T"));
+            },
+            res => {
+                // eprintln!("== explored: {} time: {:.3?}\n---------------", explored_nodes, start_time.elapsed());
+                bound = res;
             }
-            /*debug_path.pop();*/
         }
-        // eprintln!("== explored: {} time: {:.3?}\n---------------", explored_nodes, start_time.elapsed());
-        if solution.is_some() {
-            return (solution.unwrap(), String::from("F"));
-        }
-        bound = min;
     }
     return (game.book[0].clone(), String::from("N"));
 }
@@ -307,3 +276,5 @@ fn main() {
     }
 }
 
+// seed=-8138991126190463000
+// mixam85
