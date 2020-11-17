@@ -140,10 +140,9 @@ fn get_available_spells(state: [i8; 4], spells: &Vec<Action>) -> Vec<Action> {
 
 fn get_available_learns(state: [i8; 4], book: &Vec<Action>) -> Vec<Action> {
     let mut possible_learn: Vec<Action> = Vec::new();
-    for learn in book.iter() { // take pocket content -> learn spell -> pay tax
-        let simulated_state: [i8; 4] = delta_add(state, [learn.pocket, 0, 0, 0]);
-        if simulated_state.iter().sum::<i8>() <= 10 {
-            if !delta_add(simulated_state, [-learn.tax, 0, 0, 0]).iter().any(|el| *el < 0) {
+    for learn in book.iter() { // if enought for tax : take pocket content -> learn spell -> pay tax
+        if !delta_add(state, [-learn.tax, 0, 0, 0]).iter().any(|el| *el < 0) {
+            if delta_add(state, [learn.pocket, 0, 0, 0]).iter().sum::<i8>() <= 10 {
                 possible_learn.push(learn.clone());
             }
         }
@@ -165,7 +164,7 @@ fn simulate(action: &Action, state: [i8; 4], game: &Game) -> ([i8; 4], Game) {
             game_simulation.spells[spell_pos].castable = 0;
             neighbour = delta_add(state, action.delta);
         },
-        "LEARN" => { // take pocket content -> learn spell -> pay tax
+        "LEARN" => {
             let new_state: [i8; 4] = delta_add(delta_add(state, [action.pocket, 0, 0, 0]), [-action.tax, 0, 0, 0]);
             game_simulation.book.retain(|spell| spell.id != action.id);
             for learn in game_simulation.book.iter_mut() {
@@ -277,3 +276,5 @@ fn main() {
     }
 }
 
+// seed=-8138991126190463000
+// mixam85
