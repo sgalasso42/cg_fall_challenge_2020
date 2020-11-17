@@ -191,11 +191,12 @@ fn graph_search(solution: &mut Option<(Vec<Action>, i8)>, path: &mut Vec<Action>
     *explored_nodes += 1;
     let found_solutions = find_solutions(state, game_simulation);
     if !found_solutions.is_empty() {
+        // eprint!("found depth: {} for: ", path.len() - 1); for el in found_solutions.iter() { eprint!("{} price: {}, ", el.id, el.price); } eprintln!("");
+        // eprint!("path: "); for el in path.iter() { eprint!("{}, ", el.id); } eprintln!("");
         let found_solution = found_solutions.iter().max_by_key(|solution| solution.price).unwrap();
-        if solution.is_none() || (found_solution.price > solution.as_ref().unwrap().1) || (found_solution.price == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(found_solution.action)[..] == "LEARN") {
-            // eprint!("[!] found depth: {} for: ", path.len() - 1); for el in found_solutions.iter() { eprint!("{} price: {}, ", el.id, el.price); } eprintln!("");
-            // eprint!("path: "); for el in path.iter() { eprint!("{}, ", el.id); } eprintln!("");
+        if solution.is_none() || (found_solution.price > solution.as_ref().unwrap().1) || (found_solution.price == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(path.first().unwrap().action)[..] == "LEARN") {
             *solution = Some((path.clone(), found_solution.price));
+            // eprint!("[!] solution: "); for el in solution.as_ref().unwrap().0.iter() { eprint!("{}, ", el.id); } eprintln!("");
         }
     }
     let f = path.len() /*+ heuristic()*/;
@@ -276,5 +277,3 @@ fn main() {
     }
 }
 
-// seed=-8138991126190463000
-// mixam85
