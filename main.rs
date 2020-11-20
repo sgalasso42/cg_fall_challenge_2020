@@ -19,10 +19,10 @@ struct Action {
 }
 
 impl Action {
-    fn new(action: String) -> Action {
+    fn new(action: &str) -> Action {
         return Action {
             id: 0,
-            action: action,
+            action: action.to_string(),
             delta: [0, 0, 0, 0],
             price: 0,
             tax: 0,
@@ -37,8 +37,12 @@ impl Action {
 #[derive(Clone, Debug)]
 struct Game {
     turn: i32,
-    score: f64,
+    my_score: i32,
+    opp_score: i32,
+    ratio: f64,
+    served: i8,
     inventory: [i8; 4],
+    opp_inventory_score: i32,
     spells: Vec<Action>,
     book: Vec<Action>,
     orders: Vec<Action>
@@ -48,7 +52,7 @@ struct Game {
 /* - Parsing -------------------------------------------------- */
 /* ------------------------------------------------------------ */
 
-fn get_turn_informations(turn: i32) -> Game {
+fn get_turn_informations(turn: i32, served: i8) -> Game {
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
     let action_count = parse_input!(input_line, i32); // the number of spells and recipes in play
@@ -56,7 +60,7 @@ fn get_turn_informations(turn: i32) -> Game {
     let mut spells: Vec<Action> = Vec::new();
     let mut book: Vec<Action> = Vec::new();
     for i in 0..action_count as usize {
-        let mut action: Action = Action::new(String::from(""));
+        let mut action: Action = Action::new("");
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
         let inputs = input_line.split(" ").collect::<Vec<_>>();
@@ -79,7 +83,9 @@ fn get_turn_informations(turn: i32) -> Game {
         }
     }
     let mut inventory: [i8; 4] = [0, 0, 0, 0];
-    let mut score: f64 = 0.0;
+    let mut opp_inventory: [i8; 4] = [0, 0, 0, 0];
+    let mut my_score: i32 = 0;
+    let mut opp_score: i32 = 0;
     for i in 0..2 as usize {
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
@@ -89,13 +95,23 @@ fn get_turn_informations(turn: i32) -> Game {
             inventory[1] = parse_input!(inputs[1], i8);
             inventory[2] = parse_input!(inputs[2], i8);
             inventory[3] = parse_input!(inputs[3], i8);
-            score = parse_input!(inputs[4], f64); // amount of rupees
+            my_score = parse_input!(inputs[4], i32); // amount of rupees
+        } else {
+            opp_inventory[0] = parse_input!(inputs[0], i8);
+            opp_inventory[1] = parse_input!(inputs[1], i8);
+            opp_inventory[2] = parse_input!(inputs[2], i8);
+            opp_inventory[3] = parse_input!(inputs[3], i8);
+            opp_score = parse_input!(inputs[4], i32); // amount of rupees
         }
     }
     return Game {
         turn: turn,
-        score: 0.0,
+        my_score: my_score,
+        opp_score: opp_score,
+        ratio: 0.0,
+        served: served,
         inventory: inventory,
+        opp_inventory_score: inventory_final_score(opp_inventory),
         spells: spells,
         book: book,
         orders: orders
@@ -114,8 +130,13 @@ fn delta_mult(a: [i8; 4], b: [i8; 4]) -> [i8; 4] {
     return [a[0] * b[0], a[1] * b[1], a[2] * b[2], a[3] * b[3]];
 }
 
-fn get_available_brews(state: [i8; 4], orders: &Vec<Action>) -> Vec<Action> {
-    return orders.iter().filter(|order| !delta_add(state, order.delta).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
+fn inventory_final_score(state: [i8; 4]) -> i32 {
+    return (state[1] + state[2] + state[3]) as i32;
+}
+
+fn get_available_brews(state: [i8; 4], orders: &Vec<Action>, game: &Game) -> Vec<Action> {
+    let mut available_brews: Vec<Action> = orders.iter().filter(|order| !delta_add(state, order.delta).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
+    return available_brews.iter().filter(|brew| game.served < 5 || game.my_score + brew.price as i32 + inventory_final_score(delta_add(state, brew.delta)) >= game.opp_score + game.opp_inventory_score).cloned().collect::<Vec<Action>>();
 }
 
 fn get_available_spells(state: [i8; 4], spells: &Vec<Action>) -> Vec<Action> {
@@ -163,7 +184,13 @@ fn simulate(action: &Action, state: [i8; 4], depth: i32, game: &Game) -> ([i8; 4
     let mut game_simulation: Game = game.clone();
     match &action.action[..] {
         "CAST" => {
-            let spell_pos: usize = game_simulation.spells.iter().position(|spell| spell.id == action.id).unwrap() as usize;
+            let mut delta: [i8; 4] = action.delta;
+            if action.repeat > 1 {
+                for el in delta.iter_mut() {
+                    *el = *el / action.repeat;
+                }
+            }
+            let spell_pos: usize = game_simulation.spells.iter().position(|spell| spell.delta == delta).unwrap() as usize;
             game_simulation.spells[spell_pos].castable = 0;
             neighbour = delta_add(state, action.delta);
         },
@@ -185,8 +212,14 @@ fn simulate(action: &Action, state: [i8; 4], depth: i32, game: &Game) -> ([i8; 4
             neighbour = new_state;
         },
         "BREW" => {
+            game_simulation.served += 1;
             // eprintln!("brew: {}", action.id);
-            game_simulation.score += (action.price as f64 * (1.0 - (depth as f64 / 10.0)));
+            game_simulation.my_score += action.price as i32;
+            let mut diff = (game.opp_score + game.opp_inventory_score) - (game.my_score + inventory_final_score(delta_add(state, action.delta)));
+            // if diff < -20 { diff = -20 }
+            let scaled_diff = (diff as f64 - (-138.0)) / (20.0 - (-138.0));
+            game_simulation.ratio += action.price as f64 / (1.0 + ((depth as f64 - 1.0) / scaled_diff));
+            game_simulation.ratio += action.price as f64 / depth as f64;
             let brew_index = game_simulation.orders.iter().position(|brew| brew.id == action.id).unwrap();
             if brew_index == 0 && game_simulation.orders.len() > 1 {
                 game_simulation.orders[1].price += 2;
@@ -208,24 +241,30 @@ fn simulate(action: &Action, state: [i8; 4], depth: i32, game: &Game) -> ([i8; 4
 
 fn graph_search(solution: &mut Option<(Vec<Action>, f64)>, path: &mut Vec<Action>, state: [i8; 4], bound: i8, game_simulation: &Game, explored_nodes: &mut usize, start_time: std::time::Instant) -> i8 {
     *explored_nodes += 1;
-    /*|| (ratio == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(path.first().unwrap().action)[..] == "LEARN")*/
-    if game_simulation.score > solution.as_ref().unwrap().1  {
-        *solution = Some((path.clone(), game_simulation.score));
-        // eprint!("[!] new best price: {} path: ", game_simulation.score); for action in solution.as_ref().unwrap().0.iter() { eprint!("{}, ", action.id); } eprintln!("");
+    // si current_ratio > best_ratio && current_served == 6 && my_score + inventory_final_score > opp_score + game.opp_inventory_score {
+    // if game_simulation.ratio > solution.as_ref().unwrap().1 && game_simulation.served == 6 && game_simulation.my_score + inventory_final_score(state) >= game_simulation.opp_score + game_simulation.opp_inventory_score {
+    //     *solution = Some((path.clone(), game_simulation.ratio));
+    //     return -2;
+    // }
+    // si current_ratio > best_ratio || (best exist && current_ratio == best_ratio && best_action == CAST && current_action == LEARN)
+    if game_simulation.ratio > solution.as_ref().unwrap().1 || (!solution.as_ref().unwrap().0.is_empty() && game_simulation.ratio == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(path.first().unwrap().action)[..] == "LEARN")  {
+        *solution = Some((path.clone(), game_simulation.ratio));
+        eprint!("[!] new best price: {:.3} path: ", game_simulation.ratio); for action in solution.as_ref().unwrap().0.iter() { eprint!("{}, ", action.id); } eprintln!("");
     }
+
     let f = path.len() /*+ heuristic()*/;
     if f > bound as usize {
         return f as i8;
     }
-    let mut neighbors: Vec<Action> = [&get_available_spells(state, &game_simulation.spells)[..], &get_available_learns(state, &game_simulation.book)[..], &get_available_brews(state, &game_simulation.orders)[..]].concat();
+    let mut neighbors: Vec<Action> = [&get_available_spells(state, &game_simulation.spells)[..], &get_available_learns(state, &game_simulation.book)[..], &get_available_brews(state, &game_simulation.orders, game_simulation)[..]].concat();
     if game_simulation.spells.iter().any(|spell| spell.castable == 0) {
-        neighbors.push(Action::new(String::from("REST")));
+        neighbors.push(Action::new("REST"));
     }
     let mut min: i8 = std::i8::MAX;
     for action in neighbors.iter() {
         path.push(action.clone());
-        if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 45) {
-            eprintln!("timeout at: {:.3?}", start_time.elapsed());
+        if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
+            eprintln!("timeout at: {:.3?} bound: {} explored: {}", start_time.elapsed(), bound, explored_nodes);
             return -1;
         }
         let simulation: ([i8; 4], Game) = simulate(action, state, path.len() as i32, game_simulation);
@@ -247,16 +286,20 @@ fn graph_search(solution: &mut Option<(Vec<Action>, f64)>, path: &mut Vec<Action
     return min;
 }
 
-fn find_best_action(game: &Game) -> (Action, String) {
+fn find_best_action(game: &Game, registered_path: &(Vec<Action>, f64), game_forecast: &Option<Game>) -> ((Vec<Action>, f64), String) {
     let start_time: std::time::Instant = Instant::now();
-    let mut solution: Option<(Vec<Action>, f64)> = Some((Vec::new(), game.score));
+    let mut solution: Option<(Vec<Action>, f64)> = Some((Vec::new(), game.ratio));
     let mut bound: i8 = 0;
+    let mut comment: String = String::from("");
     loop {
         // eprintln!(">> new bound: {}", bound);
         let mut explored_nodes: usize = 0;
         let mut path: Vec<Action> = Vec::new();
         match graph_search(&mut solution, &mut path, game.inventory.clone(), bound, &mut game.clone(), &mut explored_nodes, start_time) {
-            -1 => {
+            x if x < 0 => {
+                // if x == -2 {
+                //     comment = String::from("S");
+                // }
                 // eprintln!("# last explored: {} time: {:.3?}", explored_nodes, start_time.elapsed());
                 break;
             },
@@ -266,16 +309,46 @@ fn find_best_action(game: &Game) -> (Action, String) {
             }
         }
     }
-    if solution.as_ref().unwrap().1 > 0.0 {
-        return (solution.as_ref().unwrap().0.first().unwrap().clone(), format!("F {:.3}", &solution.unwrap().1.to_string()));
-    }
-    if !game.inventory.iter().any(|el| *el > 0) {
-        let available_fillers = game.spells.iter().filter(|spell| spell.castable == 1 && !spell.delta.iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
-        if !available_fillers.is_empty() {
-            return (available_fillers.iter().max_by_key(|spell| spell.delta.iter().sum::<i8>()).unwrap().clone(), String::from("TI"));
+    if game_forecast.is_some() && !registered_path.0.is_empty() { // If book and orders has not been altered (if there is a registered_path) && different opp score
+        let concerned_learn: Vec<Action> = game_forecast.as_ref().unwrap().book.iter().filter(|learn| registered_path.0.contains(learn)).cloned().collect::<Vec<Action>>();
+        let concerned_orders: Vec<Action> = game_forecast.as_ref().unwrap().orders.iter().filter(|order| registered_path.0.contains(order)).cloned().collect::<Vec<Action>>();
+        if game.opp_score == game_forecast.as_ref().unwrap().opp_score && !concerned_learn.iter().any(|learn| learn != game.book.iter().find(|book_learn| book_learn.id == learn.id).unwrap_or(&Action::new(""))) && !concerned_orders.iter().any(|order| order != game.orders.iter().find(|book_order| book_order.id == order.id).unwrap_or(&Action::new(""))) {
+
+            if solution.as_ref().unwrap().1 > 0.0 { // If found a path
+                if game.turn < 6 && solution.as_ref().unwrap().1 < 8.0 {
+                    return ((vec![game.book[0].clone()], 0.0), String::from("TS"));
+                }
+                // eprintln!("F");
+                if solution.as_ref().unwrap().1 > registered_path.1 {
+                    return (solution.as_ref().unwrap().clone(), format!("F{} ({}) {:.3}", comment, solution.as_ref().unwrap().0.len(), &solution.unwrap().1.to_string()));
+                }
+            }
+            // eprintln!("C");
+            return (registered_path.clone(), String::from("C")); // [!] TODO only check alteration of elements of path
         }
     }
-    return (game.book[0].clone(), String::from("TL"));
+    if solution.as_ref().unwrap().1 > 0.0 { // If found a path
+        if game.turn < 6 && solution.as_ref().unwrap().1 < 8.0 {
+            return ((vec![game.book[0].clone()], 0.0), String::from("TS"));
+        }
+        // eprintln!("F");
+        return (solution.as_ref().unwrap().clone(), format!("F{} ({}) {:.3}", comment, solution.as_ref().unwrap().0.len(), &solution.unwrap().1.to_string()));
+    }
+    if game.inventory.iter().sum::<i8>() < 5 { // If not found a path and inventory is not filled enougth
+        let available_fillers = game.spells.iter().filter(|spell| !spell.delta.iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
+        // [!] TODO: accept aswell any sort if the result is better than current nb of elements
+        if !available_fillers.is_empty() {
+            let new_available_filters = available_fillers.iter().filter(|spell| spell.castable == 1).cloned().collect::<Vec<Action>>();
+            if !new_available_filters.is_empty() {
+                // eprintln!("TI");
+                return ((vec![new_available_filters.iter().max_by_key(|spell| spell.delta.iter().sum::<i8>()).unwrap().clone()], 0.0), String::from("TI"));
+            }
+            // eprintln!("TR");
+            return ((vec![Action::new("REST")], 0.0), String::from("TR"));
+        }
+    }
+    // eprintln!("TL");
+    return ((vec![game.book[0].clone()], 0.0), String::from("TL")); // Default, free learning
 }
 
 /* ------------------------------------------------------------ */
@@ -284,31 +357,39 @@ fn find_best_action(game: &Game) -> (Action, String) {
 
 fn main() {
     let mut turn: i32 = 0;
+    let mut served: i8 = 0;
+    let mut registered_path: (Vec<Action>, f64) = (Vec::new(), 0.0);
+    let mut game_forecast: Option<Game> = None;
     loop {
         turn += 1;
-        let mut game: Game = get_turn_informations(turn);
-        match &get_available_brews(game.inventory, &game.orders)[..] {
-            [] => {
-                let start_time = Instant::now();
-                let action: (Action, String) = find_best_action(&game);
-                eprintln!("graph search duration: {:.3?}", start_time.elapsed());
-                match &(action.0.action)[..] {
-                    "CAST" => {
-                        println!("{} {} {} {} {}", action.0.action, action.0.id, action.0.repeat, action.1, if action.0.repeat > 1 { "R" } else { "" });
-                    },
-                    "LEARN" => {
-                        println!("{} {} {}", action.0.action, action.0.id, action.1);
-                    },
-                    "REST" => {
-                        println!("{} {}", action.0.action, action.1);
-                    },
-                    _ => {}
-                }
+        let mut game: Game = get_turn_informations(turn, served);
+        eprintln!("my: {} opp: {}", game.my_score, game.opp_score);
+        let start_time = Instant::now();
+        let mut res: ((Vec<Action>, f64), String) = find_best_action(&game, &registered_path, &game_forecast);
+        // eprint!("best path: "); for ac in (res.0).0.iter() { eprint!("{}, ", ac.id); } eprintln!("");
+        registered_path = res.0.clone();
+        let action = registered_path.0.remove(0);
+        // eprint!("registered_path: "); for ac in registered_path.0.iter() { eprint!("{}, ", ac.id); } eprintln!("");
+        // eprintln!("simulating: {} {}", action.action, action.id);
+        game_forecast = Some(simulate(&action, game.inventory, 0, &game).1);
+        // eprint!("fc orders: "); for order in game_forecast.as_ref().unwrap().orders.iter() { eprint!("{}, ", order.id); } eprintln!("");
+        // eprint!("fc book: "); for learn in game_forecast.as_ref().unwrap().book.iter() { eprint!("{}, ", learn.id); } eprintln!("");
+        eprintln!("graph search duration: {:.3?}", start_time.elapsed());
+        match &(action.action)[..] {
+            "CAST" => {
+                println!("{} {} {} {}", action.action, action.id, action.repeat, res.1);
             },
-            orders => {
-                let recipe_id: i32 = orders.iter().max_by_key(|order| order.price).unwrap().id;
-                println!("BREW {}", recipe_id);
-            }
+            "LEARN" => {
+                println!("{} {} {}", action.action, action.id, res.1);
+            },
+            "REST" => {
+                println!("{} {}", action.action, res.1);
+            },
+            "BREW" => {
+                println!("BREW {}", action.id);
+                served += 1;
+            },
+            _ => {}
         }
     }
 }
