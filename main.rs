@@ -269,7 +269,6 @@ fn find_best_action(game: &Game) -> ((Action, f64), String) {
     let start_time: std::time::Instant = Instant::now();
     let mut explored_nodes: usize = 0;
     let mut projections: i32 = 0;
-
     let mut neighbors: Vec<Action> = [&get_available_spells(game.inventory, &game.spells)[..], &get_available_learns(game.inventory, &game.book)[..], &get_available_brews(game.inventory, &game.orders, game)[..]].concat();
     if game.spells.iter().any(|spell| spell.castable == 0) {
         neighbors.push(Action::new("REST"));
@@ -283,17 +282,17 @@ fn find_best_action(game: &Game) -> ((Action, f64), String) {
             if !graph_search(&mut path, simulation.0, 16, &simulation.1, &mut explored_nodes, start_time) {
                 if game.turn > 1 { eprintln!("time average per projection: {}", 50.0 / projections as f64); }
                 if !scored_neighbors.iter().any(|n| n.1 > 0.0) {
-                    return ((game.book[0].clone(), 0.0), String::from("N"));
+                    return ((game.book[0].clone(), 0.0), String::from("Et merde !"));
                 }
                 let mut max: (Action, f64) = (Action::new(""), 0.0);
                 for n in scored_neighbors.iter() { // because I can't use max_by_key
                     let ratio = n.1 / projections as f64; // TODO: prendre en compte la derniere projection probalbement non terminee
-                    eprintln!("{:<5} {:<5} {:<5.1}", n.0.action, n.0.id, ratio);
+                    eprintln!("{:<5} {:<5} {:<5.3}", n.0.action, n.0.id, ratio);
                     if ratio > max.1 {
                         max = (n.0.clone(), ratio);
                     }
                 }
-                return (max, String::from(format!("M {}", projections)));
+                return (max, String::from(format!("{}, {}", projections, explored_nodes)));
             }
             neighbour.1 += path_score(&path);
         }
@@ -313,33 +312,33 @@ fn main() {
         let mut game: Game = get_turn_informations(turn, served);
         eprintln!("my: {} opp: {}", game.my_score, game.opp_score);
         let start_time = Instant::now();
-        let mut res: ((Action, f64), String) = find_best_action(&game);
-        eprintln!("graph search duration: {:.3?}", start_time.elapsed());
-        let action = (res.0).0.clone();
-        match &(action.action)[..] {
-            "CAST" => {
-                println!("{} {} {} {} ({:.3})", action.action, action.id, action.repeat, res.1, (res.0).1);
-            },
-            "LEARN" => {
-                println!("{} {} {} ({:.3})", action.action, action.id, res.1, (res.0).1);
-            },
-            "REST" => {
-                println!("{} {} ({:.3})", action.action, res.1, (res.0).1);
-            },
-            "BREW" => {
-                println!("BREW {} {}", action.id, res.1);
-                served += 1;
-            },
-            _ => {
-                eprintln!("[!] Something occured");
+        if game.book.is_empty() {
+            println!("REST Oups !");
+        } else {
+            let mut res: ((Action, f64), String) = find_best_action(&game);
+            eprintln!("graph search duration: {:.3?}", start_time.elapsed());
+            let action = (res.0).0.clone();
+            match &(action.action)[..] {
+                "CAST" => {
+                    println!("{} {} {} {}", action.action, action.id, action.repeat, res.1);
+                },
+                "LEARN" => {
+                    println!("{} {} {}", action.action, action.id, res.1);
+                },
+                "REST" => {
+                    println!("{} {}", action.action, res.1);
+                },
+                "BREW" => {
+                    println!("BREW {} {}", action.id, res.1);
+                    served += 1;
+                },
+                _ => {
+                    eprintln!("[!] Something occured");
+                }
             }
         }
     }
 }
 
-// removed feature before monte carlo :
 // - learn phase
-// - LEARN priority over CAST
 // - C, registered_path, game_forecast
-// - TI, TR, TL
-
