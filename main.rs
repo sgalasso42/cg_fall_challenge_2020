@@ -259,7 +259,7 @@ fn simulate(action: &Action, game: &Game) -> Game {
     return game_simulation;
 }
 
-fn graph_search(path: &mut Vec<Action>, game_simulation: &Game, explored_nodes: &mut usize, start_time: std::time::Instant) -> bool {
+fn playout(path: &mut Vec<Action>, game_simulation: &Game, explored_nodes: &mut usize, start_time: std::time::Instant) -> bool {
     *explored_nodes += 1;
     if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
         eprintln!("timeout at: {:.3?} explored_nodes: {}", start_time.elapsed(), explored_nodes);
@@ -273,7 +273,7 @@ fn graph_search(path: &mut Vec<Action>, game_simulation: &Game, explored_nodes: 
         let action: Action = neighbors[rand::thread_rng().gen_range(0, &neighbors.len())].clone();
         path.push(action.clone());
         let simulation: Game = simulate(&action, &game_simulation);
-        if graph_search(path, &simulation, explored_nodes, start_time) == false {
+        if playout(path, &simulation, explored_nodes, start_time) == false {
             return false;
         }
     }
@@ -292,7 +292,7 @@ fn find_best_action(game: &Game) -> ((Action, f64), String) {
         for neighbour in scored_neighbors.iter_mut() {
             let mut path: Vec<Action> = vec![neighbour.0.clone()];
             let simulation: Game = simulate(neighbour.0, game);
-            if !graph_search(&mut path, &simulation, &mut explored_nodes, start_time) {
+            if !playout(&mut path, &simulation, &mut explored_nodes, start_time) {
                 if game.turn > 1 { eprintln!("time average per projection: {:.3}", 50.0 / projections as f64); }
                 if !scored_neighbors.iter().any(|n| n.1 > 0.0) {
                     return ((game.book[0].clone(), 0.0), String::from("Et merde !"));
@@ -311,6 +311,65 @@ fn find_best_action(game: &Game) -> ((Action, f64), String) {
         }
     }
 }
+
+/* - MCTS ----------------------------------------------------- */
+// use std::collections::VecDeque;
+
+// struct Node {
+//     state: &Game,
+//     score: f64,
+//     n: f64,
+//     neighbors: VecDeque<Node>,
+// }
+
+// fn ucb1(node: &Node, parent: &Node) -> f64 {
+//     return (node.score / node.n) + 2 * sqrt(ln(parent.n) / node.n);
+// }
+
+// fn get_neighbors(node: &Node) -> {
+//     //
+// }
+
+// fn expand_neighbors(node: &Node) -> {
+//     //
+// }
+
+// fn playout(node: &Node) -> Node{
+//     let mut current: Node = node.clone();
+//     let mut neighbors: Vec<Node> = get_neighbors(&current);
+//     while neighbors.len() > 0 {
+//         let action: Action = neighbors[rand::thread_rng().gen_range(0, &neighbors.len())].clone();
+//         current = simulate(&action, &current);
+//         neighbors: Vec<Node> = get_neighbors(&current);
+//     }
+//     return current;
+// }
+
+// fn mcts() {
+//     let start_time: std::time::Instant = Instant::now();
+//     let mut tree: VecDeque<Node> = VecDeque::new();
+//     loop {
+//         if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
+//             eprintln!("timeout at: {:.3?}", start_time.elapsed());
+//             return max(/* first actions in tree */);
+//         }
+//         let node = /* initial game state */;
+//         while node /* is not a leaf */ {
+//             let neighbors = get_neighbors(node);
+//             get_neighbors(node).iter().map(|neighbour| neighbour.ucb1 = ucb1(neighbour, neighbour.parent));
+//             node = neighbors.iter().max_by_key(|neighbour| neighbour.ucb1);
+//         }
+//         if node.nb_projections == 0 {
+//             let res = graph_search(node);
+//             backpropagate(res);
+//         } else {
+//             expand_tree(node);
+//             let neighbors = get_neighbors(node);
+//             graph_search(neighbors.first());
+//             backpropagate(res);
+//         }
+//     }
+// }
 
 /* ------------------------------------------------------------ */
 /* - Main ----------------------------------------------------- */
