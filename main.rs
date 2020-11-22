@@ -12,12 +12,12 @@ struct Action {
     id: i32,
     action: String,
     delta: [i8; 4],
-    price: i8, // if order
-    tax: i8, // if learn
-    pocket: i8, // if learn, nb of type0 stored by tax
-    repeatable: i8, // 1 if repeatable
-    repeat: i8, // if cast, repeat instruction
-    castable: i8 // 0 if castable cast
+    price: i8,
+    tax: i8,
+    pocket: i8,
+    repeatable: i8,
+    repeat: i8,
+    castable: i8
 }
 
 impl Action {
@@ -49,6 +49,25 @@ struct Game {
     spells: Vec<Action>,
     book: Vec<Action>,
     orders: Vec<Action>
+}
+
+#[derive(Clone, Debug)]
+struct Node {
+    action: Action,
+    state: Game,
+    score: f32,
+    n: u32,
+}
+
+impl Node {
+    fn new(action: Action, state: Game) -> Node {
+        return Node {
+            action: action,
+            state: state,
+            score: 0.0,
+            n: 0,
+        }
+    }
 }
 
 /* ------------------------------------------------------------ */
@@ -142,11 +161,7 @@ fn inventory_final_score(state: [i8; 4]) -> i32 {
 }
 
 fn get_available_brews(game: &Game) -> Vec<Action> {
-    if game.served > 6 {
-        return Vec::new();
-    }
-    let mut available_brews: Vec<Action> = game.orders.iter().filter(|order| !delta_add(&game.inventory, &order.delta).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
-    return available_brews.iter().filter(|brew| game.served < 5 || game.my_score + brew.price as i32 + inventory_final_score(delta_add(&game.inventory, &brew.delta)) - 1 /* -1 ARBITRAIRE SERT DE SECURITEE, A REFACTOR VOIE BLOC NOTE */ > game.opp_score + game.opp_inventory_score).cloned().collect::<Vec<Action>>();
+    return game.orders.iter().filter(|order| !delta_add(&game.inventory, &order.delta).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
 }
 
 fn get_available_spells(game: &Game) -> Vec<Action> {
@@ -160,7 +175,6 @@ fn get_available_spells(game: &Game) -> Vec<Action> {
                 new_spell.delta = delta_mult(&spell.delta, &[repeat_count, repeat_count, repeat_count, repeat_count]);
                 new_spell.repeat = repeat_count;
                 let missing_table = delta_add(&game.inventory, &new_spell.delta);
-                // eprintln!("mt: {:?}", missing_table);
                 if !missing_table.iter().any(|el| *el < 0) && missing_table.iter().sum::<i8>() <= 10 {
                     possible_cast.push(new_spell);
                     if spell.repeatable == 0 { break; }
@@ -184,26 +198,39 @@ fn get_available_learns(game: &Game) -> Vec<Action> {
 }
 
 fn get_neighbors(game: &Game) -> Vec<Action> {
-    let mut neighbors: Vec<Action> = [&get_available_spells(&game)[..], &get_available_learns(&game)[..], &get_available_brews(&game)[..]].concat();
-    if game.spells.iter().any(|spell| spell.castable == 0) {
-        neighbors.push(Action::new("REST"));
+    let mut neighbors: Vec<Action> = Vec::new();
+    let calculated_turns_left: i32 = ((100 - game.calc_turn) as f32 / (1.0 + game.opp_served as f32)) as i32;
+    if game.calc_turn < game.turn + calculated_turns_left && game.served < 6 {
+        neighbors = [&get_available_spells(&game)[..], &get_available_learns(&game)[..], &get_available_brews(&game)[..]].concat();
+        if game.spells.iter().any(|spell| spell.castable == 0) {
+            neighbors.push(Action::new("REST"));
+        }
     }
     return neighbors;
 }
 
-fn path_score(path: &Vec<Action>, game: &Game) -> f64 {
+fn path_score(path: &Vec<Action>, game: &Game) -> f32 {
     let mut total_price: i8 = 0;
-    let mut score: f64 = 0.0;
+    let mut score: f32 = 0.0;
+    let mut nb: i8 = 0;
     for (i, action) in path.iter().enumerate() {
         if &(action.action)[..] == "BREW" {
-            let turn = game.turn + i as i32;
-            let coef: f64 = turn as f64 / 100.0;
-            // score += action.price as f64 / (1.0 + (i as f64/* / (1.0 - coef)*/)); // RELEASE
-            // score += action.price as f64 - action.price as f64 * (i as f64 / 100.0); // DEBUG
-            score += action.price as f64;
+            // let turn = game.calc_turn + i as i32;
+            // let coef: f32 = turn as f32 / 100.0;
+            // score += action.price as f32 / (1.0 + (i as f32/* / (1.0 - coef)*/)); // RELEASE
+            // score += action.price as f32 - action.price as f32 * (i as f32 / 100.0); // DEBUG
+            // score += ((100 - i) as f32 * ((action.price as f32 * 100.0) / 126.0));
+            // total_price += action.price;
+            // nb += 1;
+            let calculated_turns_left: i8 = ((100 - (game.turn + i as i32)) as f32 / (1.0 + game.opp_served as f32)) as i8;
+            score += action.price as f32 - (action.price as f32 * (i as f32 / calculated_turns_left as f32));
+            // score += action.price as f32 / (1.0 + i as f32);
         }
     }
-    return score as f64;
+    // return score as f32 / path.len() as f32;
+    // return score as f32 * (((100 - path.len()) as f32 * 126.0) / 100.0);
+    // return score;
+    return score as f32;
 }
 
 fn simulate(action: &Action, game: &Game) -> Game {
@@ -216,12 +243,12 @@ fn simulate(action: &Action, game: &Game) -> Game {
                     *el = *el / action.repeat;
                 }
             }
-            let spell_pos: usize = game_simulation.spells.iter().position(|spell| spell.delta == delta).unwrap() as usize;
+            let spell_pos: usize = game_simulation.spells.iter().position(|spell| spell.delta == delta).expect("game_simulation.spells.iter().position(|spell| spell.delta == delta)") as usize;
             game_simulation.spells[spell_pos].castable = 0;
             game_simulation.inventory = delta_add(&game.inventory, &action.delta);
         },
         "LEARN" => {
-            let learn_index = &game_simulation.book.iter().position(|learn| learn.id == action.id).unwrap();
+            let learn_index = &game_simulation.book.iter().position(|learn| learn.id == action.id).expect("&game_simulation.book.iter().position(|learn| learn.id == action.id)");
             for (i, learn) in game_simulation.book.iter_mut().enumerate() {
                 if learn.tax > 0 && i > *learn_index {
                     learn.tax -= 1;
@@ -239,7 +266,7 @@ fn simulate(action: &Action, game: &Game) -> Game {
         "BREW" => {
             game_simulation.served += 1;
             game_simulation.my_score += action.price as i32;
-            let brew_index = game_simulation.orders.iter().position(|brew| brew.id == action.id).unwrap();
+            let brew_index = game_simulation.orders.iter().position(|brew| brew.id == action.id).expect("game_simulation.orders.iter().position(|brew| brew.id == action.id)");
             if brew_index == 0 && game_simulation.orders.len() > 1 {
                 game_simulation.orders[1].price += 2;
             } else if brew_index == 1 && game_simulation.orders.len() > 2 {
@@ -259,117 +286,77 @@ fn simulate(action: &Action, game: &Game) -> Game {
     return game_simulation;
 }
 
-fn playout(path: &mut Vec<Action>, game_simulation: &Game, explored_nodes: &mut usize, start_time: std::time::Instant) -> bool {
-    *explored_nodes += 1;
-    if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
-        eprintln!("timeout at: {:.3?} explored_nodes: {}", start_time.elapsed(), explored_nodes);
-        return false;
-    }
-    if path.len() as i32 > (((100.0 - game_simulation.calc_turn as f64) * ((6.0 - cmp::max(game_simulation.served, game_simulation.opp_served) as f64) / 6.0)) / 2.0) as i32 {
-        return true;
-    }
-    let neighbors: Vec<Action> = get_neighbors(&game_simulation);
-    if neighbors.len() > 0 {
-        let action: Action = neighbors[rand::thread_rng().gen_range(0, &neighbors.len())].clone();
-        path.push(action.clone());
-        let simulation: Game = simulate(&action, &game_simulation);
-        if playout(path, &simulation, explored_nodes, start_time) == false {
-            return false;
+fn playout(current: &Node, explored_nodes: &mut u32, start_time: std::time::Instant) -> Option<Vec<Action>> {
+    let mut path: Vec<Action> = vec![current.action.clone()];
+    let mut simulation: Game = current.state.clone();
+    loop {
+        *explored_nodes += 1;
+        match get_neighbors(&simulation) {
+            _ if (simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (simulation.turn > 1 && start_time.elapsed().as_millis() > 48) => {
+                eprintln!("timeout at: {:.3?} explored_nodes: {}", start_time.elapsed(), explored_nodes);
+                return None;
+            },
+            ref neighbors if neighbors.len() > 0 => {
+                let action: Action = neighbors[rand::thread_rng().gen_range(0, &neighbors.len())].clone();
+                path.push(action.clone());
+                simulation = simulate(&action, &simulation);
+            },
+            _ => {
+                return Some(path);
+            }
         }
     }
-    return true;
 }
 
-fn find_best_action(game: &Game) -> ((Action, f64), String) {
-    let start_time: std::time::Instant = Instant::now();
-    let mut explored_nodes: usize = 0;
-    let mut projections: i32 = 0;
-    let neighbors: Vec<Action> = get_neighbors(&game);
-    let mut scored_neighbors: Vec<(&Action, f64)> = neighbors.iter().map(|neighbour| (neighbour, 0.0)).collect();
-    eprintln!("bound: {}", (((100.0 - game.calc_turn as f64) * ((6.0 - cmp::max(game.served, game.opp_served) as f64) / 6.0)) / 2.0) as i32);
+fn uct(neighbors: &Vec<Node>, parent_n: u32) -> Option<usize> {
+    let mut max: (Option<usize>, f32) = (None, std::f32::NEG_INFINITY);
+    for (i, neighbour) in neighbors.iter().enumerate() {
+        if neighbour.n == 0 {
+            return Some(i);
+        }
+        let val: f32 = (neighbour.score / neighbour.n as f32) + (2 as f32).sqrt() * ((parent_n as f32).ln() / neighbour.n as f32).sqrt();
+        if val > max.1 {
+            max = (Some(i), val);
+        }
+    }
+    return max.0;
+}
+
+fn find_best_action(game: &Game, start_time: std::time::Instant) -> ((Action, f32), String) {
+    let mut explored_nodes: u32 = 0;
+    let mut n: u32 = 0;
+    let mut neighbors: Vec<Node> = get_neighbors(&game).iter().map(|neighbour| Node::new(neighbour.clone(), simulate(neighbour, game))).collect();
     loop {
-        projections += 1;
-        for neighbour in scored_neighbors.iter_mut() {
-            let mut path: Vec<Action> = vec![neighbour.0.clone()];
-            let simulation: Game = simulate(neighbour.0, game);
-            if !playout(&mut path, &simulation, &mut explored_nodes, start_time) {
-                if game.turn > 1 { eprintln!("time average per projection: {:.3}", 50.0 / projections as f64); }
-                if !scored_neighbors.iter().any(|n| n.1 > 0.0) {
-                    return ((game.book[0].clone(), 0.0), String::from("Et merde !"));
-                }
-                let mut max: (Action, f64) = (Action::new(""), 0.0);
-                for n in scored_neighbors.iter() { // because I can't use max_by_key
-                    let ratio = n.1 ;/// projections as f64; // TODO: prendre en compte la derniere projection probalbement non terminee
-                    eprintln!("{:<5} {:<5} {:<5.3}", n.0.action, n.0.id, ratio);
-                    if ratio > max.1 {
-                        max = (n.0.clone(), ratio);
+        match uct(&neighbors, n) {
+            Some(current) => {
+                match playout(&neighbors[current], &mut explored_nodes, start_time) {
+                    Some(path) => {
+                        neighbors[current].score += path_score(&path, game);
+                        neighbors[current].n += 1;
+                        n += 1;
+                    },
+                    _ => {
+                        if !neighbors.iter().any(|neighbour| neighbour.score > 0.0) {
+                            return ((game.book[0].clone(), 0.0), String::from("Well done !"));
+                        }
+                        let mut max: (Action, f32) = (Action::new(""), 0.0);
+                        for neighbour in neighbors.iter() {
+                            let ratio = neighbour.score / neighbour.n as f32;
+                            eprintln!("{:<5} {:<5} score: {:<9.3} n: {:<5} ratio: {:<5.3}", neighbour.action.action, neighbour.action.id, neighbour.score, neighbour.n, ratio);
+                            if ratio > max.1 {
+                                max = (neighbour.action.clone(), ratio);
+                            }
+                        }
+                        return (max, String::from(format!("{}, {}", n, explored_nodes)));
                     }
                 }
-                return (max, String::from(format!("{}, {}", projections, explored_nodes)));
+            },
+            _ => {
+                return ((game.book[0].clone(), 0.0), String::from("Need more power !"));
             }
-            neighbour.1 += path_score(&path, game);
         }
     }
 }
-
-/* - MCTS ----------------------------------------------------- */
-// use std::collections::VecDeque;
-
-// struct Node {
-//     state: &Game,
-//     score: f64,
-//     n: f64,
-//     neighbors: VecDeque<Node>,
-// }
-
-// fn ucb1(node: &Node, parent: &Node) -> f64 {
-//     return (node.score / node.n) + 2 * sqrt(ln(parent.n) / node.n);
-// }
-
-// fn get_neighbors(node: &Node) -> {
-//     //
-// }
-
-// fn expand_neighbors(node: &Node) -> {
-//     //
-// }
-
-// fn playout(node: &Node) -> Node{
-//     let mut current: Node = node.clone();
-//     let mut neighbors: Vec<Node> = get_neighbors(&current);
-//     while neighbors.len() > 0 {
-//         let action: Action = neighbors[rand::thread_rng().gen_range(0, &neighbors.len())].clone();
-//         current = simulate(&action, &current);
-//         neighbors: Vec<Node> = get_neighbors(&current);
-//     }
-//     return current;
-// }
-
-// fn mcts() {
-//     let start_time: std::time::Instant = Instant::now();
-//     let mut tree: VecDeque<Node> = VecDeque::new();
-//     loop {
-//         if (game_simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (game_simulation.turn > 1 && start_time.elapsed().as_millis() > 48) {
-//             eprintln!("timeout at: {:.3?}", start_time.elapsed());
-//             return max(/* first actions in tree */);
-//         }
-//         let node = /* initial game state */;
-//         while node /* is not a leaf */ {
-//             let neighbors = get_neighbors(node);
-//             get_neighbors(node).iter().map(|neighbour| neighbour.ucb1 = ucb1(neighbour, neighbour.parent));
-//             node = neighbors.iter().max_by_key(|neighbour| neighbour.ucb1);
-//         }
-//         if node.nb_projections == 0 {
-//             let res = graph_search(node);
-//             backpropagate(res);
-//         } else {
-//             expand_tree(node);
-//             let neighbors = get_neighbors(node);
-//             graph_search(neighbors.first());
-//             backpropagate(res);
-//         }
-//     }
-// }
 
 /* ------------------------------------------------------------ */
 /* - Main ----------------------------------------------------- */
@@ -380,19 +367,22 @@ fn main() {
     let mut served: i8 = 0;
     let mut opp_score: i32 = 0;
     let mut opp_served: i8 = 0;
-    // let mut game_forecast: Option<Game> = None;
     loop {
         turn += 1;
         let mut game: Game = get_turn_informations(turn, served, opp_score, opp_served);
+        let start_time: std::time::Instant = Instant::now();
         opp_score = game.opp_score;
         opp_served = game.opp_served;
         eprintln!("my_score: {} opp_score: {}", game.my_score, game.opp_score);
         eprintln!("my_served: {} opp_served: {}", game.served, game.opp_served);
-        let start_time = Instant::now();
+        // TIME LEFT ONLY BASED ON OPP_SERVED :
+        //      USE ALSO MY_SERVED BUT BE CAREFULL :
+        //          IF NO SOLUTION FOUND BETWEEN CURRENT TURN AND CALC_TURN_LEFT : UPDATE CALC_TURN_LEFT AND FIND A SOLUTION 
+        eprintln!("calculated turns left: {}", ((100 - game.turn) as f32 / (1.0 + game.opp_served as f32)) as i8);
         if game.book.is_empty() {
             println!("REST Oups !");
         } else {
-            let mut res: ((Action, f64), String) = find_best_action(&game);
+            let mut res: ((Action, f32), String) = find_best_action(&game, start_time);
             eprintln!("graph search duration: {:.3?}", start_time.elapsed());
             let action = (res.0).0.clone();
             match &(action.action)[..] {
@@ -416,5 +406,3 @@ fn main() {
         }
     }
 }
-
-// - C, registered_path, game_forecast
