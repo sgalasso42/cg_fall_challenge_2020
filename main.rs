@@ -1,7 +1,5 @@
 use std::io;
 use std::time::{Instant};
-use rand::Rng;
-use std::cmp;
 
 macro_rules! parse_input {
     ($x:expr, $t:ident) => ($x.trim().parse::<$t>().unwrap())
@@ -12,12 +10,12 @@ struct Action {
     id: i32,
     action: String,
     delta: [i8; 4],
-    price: i8,
-    tax: i8,
-    pocket: i8,
-    repeatable: i8,
-    repeat: i8,
-    castable: i8
+    price: i8, // if order
+    tax: i8, // if learn
+    pocket: i8, // if learn, nb of type0 stored by tax
+    repeatable: i8, // 1 if repeatable
+    repeat: i8, // if cast, repeat instruction
+    castable: i8 // 0 if castable cast
 }
 
 impl Action {
@@ -38,43 +36,24 @@ impl Action {
 
 #[derive(Clone, Debug)]
 struct Game {
-    turn: i32,
-    calc_turn: i32,
-    my_score: i32,
-    opp_score: i32,
+    base_turn: i8,
+    turn: i8,
+    my_score: i8,
+    opp_score: i8,
+    ratio: f32,
     served: i8,
-    opp_served: i8,
     inventory: [i8; 4],
-    opp_inventory_score: i32,
+    opp_inventory_score: i8,
     spells: Vec<Action>,
     book: Vec<Action>,
     orders: Vec<Action>
-}
-
-#[derive(Clone, Debug)]
-struct Node {
-    action: Action,
-    state: Game,
-    score: f32,
-    n: u32,
-}
-
-impl Node {
-    fn new(action: Action, state: Game) -> Node {
-        return Node {
-            action: action,
-            state: state,
-            score: 0.0,
-            n: 0,
-        }
-    }
 }
 
 /* ------------------------------------------------------------ */
 /* - Parsing -------------------------------------------------- */
 /* ------------------------------------------------------------ */
 
-fn get_turn_informations(turn: i32, served: i8, previous_opp_score: i32, mut opp_served: i8) -> Game {
+fn get_turn_informations(turn: i8, served: i8) -> Game {
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
     let action_count = parse_input!(input_line, i32); // the number of spells and recipes in play
@@ -106,8 +85,8 @@ fn get_turn_informations(turn: i32, served: i8, previous_opp_score: i32, mut opp
     }
     let mut inventory: [i8; 4] = [0, 0, 0, 0];
     let mut opp_inventory: [i8; 4] = [0, 0, 0, 0];
-    let mut my_score: i32 = 0;
-    let mut opp_score: i32 = 0;
+    let mut my_score: i8 = 0;
+    let mut opp_score: i8 = 0;
     for i in 0..2 as usize {
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
@@ -117,25 +96,22 @@ fn get_turn_informations(turn: i32, served: i8, previous_opp_score: i32, mut opp
             inventory[1] = parse_input!(inputs[1], i8);
             inventory[2] = parse_input!(inputs[2], i8);
             inventory[3] = parse_input!(inputs[3], i8);
-            my_score = parse_input!(inputs[4], i32); // amount of rupees
+            my_score = parse_input!(inputs[4], i8); // amount of rupees
         } else {
             opp_inventory[0] = parse_input!(inputs[0], i8);
             opp_inventory[1] = parse_input!(inputs[1], i8);
             opp_inventory[2] = parse_input!(inputs[2], i8);
             opp_inventory[3] = parse_input!(inputs[3], i8);
-            opp_score = parse_input!(inputs[4], i32); // amount of rupees
+            opp_score = parse_input!(inputs[4], i8); // amount of rupees
         }
     }
-    if previous_opp_score != opp_score {
-        opp_served += 1;
-    }
     return Game {
+        base_turn: turn,
         turn: turn,
-        calc_turn: turn,
         my_score: my_score,
         opp_score: opp_score,
+        ratio: 0.0,
         served: served,
-        opp_served: opp_served,
         inventory: inventory,
         opp_inventory_score: inventory_final_score(opp_inventory),
         spells: spells,
@@ -156,12 +132,13 @@ fn delta_mult(a: &[i8; 4], b: &[i8; 4]) -> [i8; 4] {
     return [a[0] * b[0], a[1] * b[1], a[2] * b[2], a[3] * b[3]];
 }
 
-fn inventory_final_score(state: [i8; 4]) -> i32 {
-    return (state[1] + state[2] + state[3]) as i32;
+fn inventory_final_score(state: [i8; 4]) -> i8 {
+    return (state[1] + state[2] + state[3]) as i8;
 }
 
 fn get_available_brews(game: &Game) -> Vec<Action> {
-    return game.orders.iter().filter(|order| !delta_add(&game.inventory, &order.delta).iter().any(|el| *el < 0) && (game.served < 5 || game.my_score + order.price as i32 + inventory_final_score(delta_add(&game.inventory, &order.delta)) > game.opp_score + game.opp_inventory_score)).cloned().collect::<Vec<Action>>();
+    let mut available_brews: Vec<Action> = game.orders.iter().filter(|order| !delta_add(&game.inventory, &order.delta).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
+    return available_brews.iter().filter(|brew| game.served < 5 || game.my_score + brew.price + inventory_final_score(delta_add(&game.inventory, &brew.delta)) > game.opp_score + game.opp_inventory_score).cloned().collect::<Vec<Action>>();
 }
 
 fn get_available_spells(game: &Game) -> Vec<Action> {
@@ -199,9 +176,7 @@ fn get_available_learns(game: &Game) -> Vec<Action> {
 
 fn get_neighbors(game: &Game) -> Vec<Action> {
     let mut neighbors: Vec<Action> = Vec::new();
-    // let calculated_turns_left: i32 = ((100 - game.calc_turn) as f32 * ((6 - cmp::max(game.served, game.opp_served)) as f32 / 6.0)) as i32;
-    // let calculated_turns_left: i32 = ((100 - game.calc_turn) as f32 / (1.0 + cmp::max(game.served, game.opp_served) as f32)) as i32;
-    if game.calc_turn < 100 && game.served < 6 {
+    if game.turn < 100 && game.served < 6 {
         neighbors = [&get_available_spells(&game)[..], &get_available_learns(&game)[..], &get_available_brews(&game)[..]].concat();
         if game.spells.iter().any(|spell| spell.castable == 0) {
             neighbors.push(Action::new("REST"));
@@ -210,35 +185,7 @@ fn get_neighbors(game: &Game) -> Vec<Action> {
     return neighbors;
 }
 
-fn path_score(path: &Vec<Action>, game: &Game) -> f32 {
-    let mut total_price: i8 = 0;
-    let mut score: f32 = 0.0;
-    let mut nb: i8 = 0;
-    for (i, action) in path.iter().enumerate() {
-        if &(action.action)[..] == "BREW" {
-            // let turn = game.calc_turn + i as i32;
-            // let coef: f32 = turn as f32 / 100.0;
-            // score += action.price as f32 / (1.0 + (i as f32/* / (1.0 - coef)*/));
-            // score += action.price as f32 - action.price as f32 * (i as f32 / 100.0);
-            // score += ((100 - i) as f32 * ((action.price as f32 * 100.0) / 126.0));
-            // total_price += action.price;
-            // nb += 1;
-            
-            // let calculated_turns_left: i8 = ((100 - (game.turn + i as i32)) as f32 / (1.0 + cmp::max(game.served, game.opp_served) as f32)) as i8;
-            // let calculated_turns_left: i8 = ((100 - game.turn) as f32 * ((6 - cmp::max(game.served, game.opp_served)) as f32 / 6.0)) as i8;
-            // let calculated_turns_left: i8 = ((100 - game.turn) as f32 * (1.0 - (cmp::max(game.served, game.opp_served) as f32 / 7.0) as f32)) as i8;
-            // score += action.price as f32 - action.price as f32 * (i as f32 / (100 - (game.turn + i as i32)) as f32); // RELEASE
-            // score += action.price as f32 / (1.0 + i as f32);
-            score += action.price as f32 / i as f32;
-        }
-    }
-    // return score as f32 / path.len() as f32;
-    // return score as f32 * (((100 - path.len()) as f32 * 126.0) / 100.0);
-    // return score;
-    return score as f32;
-}
-
-fn simulate(action: &Action, game: &Game) -> Game {
+fn simulate(action: &Action, depth: i32, game: &Game) -> Game {
     let mut game_simulation: Game = game.clone();
     match &action.action[..] {
         "CAST" => {
@@ -253,6 +200,7 @@ fn simulate(action: &Action, game: &Game) -> Game {
             game_simulation.inventory = delta_add(&game.inventory, &action.delta);
         },
         "LEARN" => {
+            let new_s: [i8; 4] = delta_add(&delta_add(&game.inventory, &[action.pocket, 0, 0, 0]), &[-action.tax, 0, 0, 0]);
             let learn_index = &game_simulation.book.iter().position(|learn| learn.id == action.id).expect("&game_simulation.book.iter().position(|learn| learn.id == action.id)");
             for (i, learn) in game_simulation.book.iter_mut().enumerate() {
                 if learn.tax > 0 && i > *learn_index {
@@ -266,11 +214,18 @@ fn simulate(action: &Action, game: &Game) -> Game {
             new_spell.action = String::from("CAST");
             new_spell.castable = 1;
             game_simulation.spells.push(new_spell);
-            game_simulation.inventory = delta_add(&delta_add(&game.inventory, &[action.pocket, 0, 0, 0]), &[-action.tax, 0, 0, 0]);
+            game_simulation.inventory = new_s;
         },
         "BREW" => {
             game_simulation.served += 1;
-            game_simulation.my_score += action.price as i32;
+            game_simulation.my_score += action.price;
+
+            // let mut diff = (game.opp_score + game.opp_inventory_score) - (game.my_score + inventory_final_score(delta_add(&game.inventory, &action.delta)));
+            // let scaled_diff = (diff as f32 - (-138.0)) / (20.0 - (-138.0));
+            // game_simulation.ratio += action.price as f32 / (1.0 + ((depth as f32 - 1.0) / scaled_diff));
+            // game_simulation.ratio += action.price as f32 / (1.0 + depth as f32) + delta_add(&game.inventory, &action.delta).iter().sum::<i8>() as f32;
+            game_simulation.ratio += action.price as f32 - (2.0 * depth as f32) + delta_add(&game.inventory, &action.delta).iter().sum::<i8>() as f32;
+
             let brew_index = game_simulation.orders.iter().position(|brew| brew.id == action.id).expect("game_simulation.orders.iter().position(|brew| brew.id == action.id)");
             if brew_index == 0 && game_simulation.orders.len() > 1 {
                 game_simulation.orders[1].price += 2;
@@ -287,86 +242,75 @@ fn simulate(action: &Action, game: &Game) -> Game {
         },
         _ => {}
     };
-    game_simulation.calc_turn += 1;
+    game_simulation.turn += 1;
     return game_simulation;
 }
 
-fn playout(current: &Node, explored_nodes: &mut u32, start_time: std::time::Instant) -> Option<Vec<Action>> {
-    let mut path: Vec<Action> = vec![current.action.clone()];
-    let mut simulation: Game = current.state.clone();
-    loop {
-        *explored_nodes += 1;
-        match get_neighbors(&simulation) {
-            _ if (simulation.turn == 1 && start_time.elapsed().as_millis() > 998) || (simulation.turn > 1 && start_time.elapsed().as_millis() > 48) => {
-                eprintln!("timeout at: {:.3?} explored_nodes: {}", start_time.elapsed(), explored_nodes);
-                return None;
-            },
-            ref neighbors if neighbors.len() > 0 => {
-                let action: Action = neighbors[rand::thread_rng().gen_range(0, &neighbors.len())].clone();
-                path.push(action.clone());
-                simulation = simulate(&action, &simulation);
-            },
-            _ => {
-                return Some(path);
-            }
-        }
+fn graph_search(solution: &mut Option<(Vec<Action>, f32)>, path: &mut Vec<Action>, bound: i8, game: &Game, explored_nodes: &mut usize, start_time: std::time::Instant) -> bool {
+    *explored_nodes += 1;
+    if game.ratio > solution.as_ref().unwrap().1 || (!solution.as_ref().unwrap().0.is_empty() && game.ratio == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(path.first().unwrap().action)[..] == "LEARN")  {
+        *solution = Some((path.clone(), game.ratio));
+        eprint!("[!] new best price: {:.3} path: ", game.ratio); for action in solution.as_ref().unwrap().0.iter() { eprint!("{}, ", action.id); } eprintln!("");
     }
+    if path.len() > bound as usize {
+        return true;
+    }
+    for action in get_neighbors(game).iter() {
+        path.push(action.clone());
+        if (game.base_turn == 1 && start_time.elapsed().as_millis() > 998) || (game.base_turn > 1 && start_time.elapsed().as_millis() > 48) {
+            eprintln!("timeout at: {:.3?} bound: {} explored: {}", start_time.elapsed(), bound, explored_nodes);
+            return false;
+        }
+        let simulation: Game = simulate(action, path.len() as i32, game);
+        if !graph_search(solution, path,bound, &simulation, explored_nodes, start_time) {
+            return false;
+        }
+        path.pop();
+    }
+    return true;
 }
 
-fn uct(neighbors: &Vec<Node>, parent_n: u32) -> Option<usize> {
-    let mut max: (Option<usize>, f32) = (None, std::f32::NEG_INFINITY);
-    for (i, neighbour) in neighbors.iter().enumerate() {
-        if neighbour.n == 0 {
-            return Some(i);
-        }
-        let val: f32 = (neighbour.score / neighbour.n as f32) + (2 as f32).sqrt() * ((parent_n as f32).ln() / neighbour.n as f32).sqrt();
-        if val > max.1 {
-            max = (Some(i), val);
-        }
-    }
-    return max.0;
-}
-
-fn find_best_action(game: &Game, start_time: std::time::Instant) -> ((Action, f32), String) {
-    let mut explored_nodes: u32 = 0;
-    let mut n: u32 = 0;
-    let mut neighbors: Vec<Node> = get_neighbors(&game).iter().map(|neighbour| Node::new(neighbour.clone(), simulate(neighbour, game))).collect();
+fn find_best_path(game: &Game, registered_path: &(Vec<Action>, f32), game_forecast: &Option<Game>, start_time: std::time::Instant) -> ((Vec<Action>, f32), String) {
+    let mut solution: Option<(Vec<Action>, f32)> = Some((Vec::new(), game.ratio));
+    let mut bound: i8 = 0;
     loop {
-        match uct(&neighbors, n) {
-            Some(current) => {
-                match playout(&neighbors[current], &mut explored_nodes, start_time) {
-                    Some(path) => {
-                        neighbors[current].score += path_score(&path, game);
-                        neighbors[current].n += 1;
-                        n += 1;
-                    },
-                    _ => {
-                        if !neighbors.iter().any(|neighbour| neighbour.score > 0.0) {
-                            if game.book.len() > 0 {
-                                return ((game.book[0].clone(), 0.0), String::from("No path found"));
-                            }
-                            return ((Action::new("REST"), 0.0), String::from("No path found & no book left)"));
-                        }
-                        let mut max: (Action, f32) = (Action::new(""), 0.0);
-                        for neighbour in neighbors.iter() {
-                            let ratio = neighbour.score / neighbour.n as f32;
-                            eprintln!("{:<5} {:<5} score: {:<9.3} n: {:<5} ratio: {:<5.3}", neighbour.action.action, neighbour.action.id, neighbour.score, neighbour.n, ratio);
-                            if ratio > max.1 {
-                                max = (neighbour.action.clone(), ratio);
-                            }
-                        }
-                        return (max, String::from(format!("{}, {}", n, explored_nodes)));
-                    }
-                }
-            },
-            _ => {
-                if game.book.len() > 0 {
-                    return ((game.book[0].clone(), 0.0), String::from("No path with score > 0"));
-                }
-                return ((Action::new("REST"), 0.0), String::from("No path found & no book left)"));
-            }
+        let mut explored_nodes: usize = 0;
+        let mut path: Vec<Action> = Vec::new();
+        if !graph_search(&mut solution, &mut path, bound, &mut game.clone(), &mut explored_nodes, start_time) {
+            break;
+        }
+        bound += 1;
+    }
+    if game_forecast.is_some() && !registered_path.0.is_empty() { // If book and orders has not been altered (if there is a registered_path) && different opp score
+        let concerned_learn: Vec<Action> = game_forecast.as_ref().unwrap().book.iter().filter(|learn| registered_path.0.contains(learn)).cloned().collect::<Vec<Action>>();
+        let concerned_orders: Vec<Action> = game_forecast.as_ref().unwrap().orders.iter().filter(|order| registered_path.0.contains(order)).cloned().collect::<Vec<Action>>();
+        let is_opp_score_altered: bool = game.opp_score != game_forecast.as_ref().unwrap().opp_score;
+        let is_concerned_learn_altered: bool = concerned_learn.iter().any(|learn| learn != game.book.iter().find(|book_learn| book_learn.id == learn.id).unwrap_or(&Action::new("")));
+        let is_concerned_orders_altered: bool = concerned_orders.iter().any(|order| order != game.orders.iter().find(|book_order| book_order.id == order.id).unwrap_or(&Action::new("")));
+        if !is_opp_score_altered && !is_concerned_learn_altered && !is_concerned_orders_altered && (solution.as_ref().unwrap().1 < 0.0 || solution.as_ref().unwrap().1 < registered_path.1) {
+            return (registered_path.clone(), String::from("C"));
         }
     }
+    if solution.as_ref().unwrap().1 > 0.0 { // Found a path
+        if game.base_turn < 5 && solution.as_ref().unwrap().1 < 8.0 {
+            return ((vec![game.book[0].clone()], 0.0), String::from("TS"));
+        }
+        return (solution.as_ref().unwrap().clone(), format!("F ({}) {:.3}", solution.as_ref().unwrap().0.len(), &solution.unwrap().1.to_string()));
+    } else if game.inventory.iter().sum::<i8>() < 5 { // No path found and inventory is not filled enougth
+        let possible_spells = game.spells.iter().filter(|spell| !delta_add(&spell.delta, &game.inventory).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
+        let available_fillers = possible_spells.iter().filter(|spell| delta_add(&spell.delta, &game.inventory).iter().sum::<i8>() > game.inventory.iter().sum::<i8>()).cloned().collect::<Vec<Action>>();
+        if !available_fillers.is_empty() {
+            let new_available_filters = available_fillers.iter().filter(|spell| spell.castable == 1).cloned().collect::<Vec<Action>>();
+            if !new_available_filters.is_empty() {
+                return ((vec![new_available_filters.iter().max_by_key(|spell| spell.delta.iter().sum::<i8>()).unwrap().clone()], 0.0), String::from("TI"));
+            }
+            return ((vec![Action::new("REST")], 0.0), String::from("TR"));
+        }
+    }
+    if !game.book.is_empty() {
+        return ((vec![game.book[0].clone()], 0.0), String::from("TL"));
+    }
+    return ((vec![Action::new("REST")], 0.0), String::from("Et merde !"));
 }
 
 /* ------------------------------------------------------------ */
@@ -374,35 +318,33 @@ fn find_best_action(game: &Game, start_time: std::time::Instant) -> ((Action, f3
 /* ------------------------------------------------------------ */
 
 fn main() {
-    let mut turn: i32 = 0;
+    let mut turn: i8 = 0;
     let mut served: i8 = 0;
-    let mut opp_score: i32 = 0;
-    let mut opp_served: i8 = 0;
+    let mut registered_path: (Vec<Action>, f32) = (Vec::new(), 0.0);
+    let mut game_forecast: Option<Game> = None;
     loop {
         turn += 1;
-        let mut game: Game = get_turn_informations(turn, served, opp_score, opp_served);
-        let start_time: std::time::Instant = Instant::now();
-        opp_score = game.opp_score;
-        opp_served = game.opp_served;
-        eprintln!("my_score: {} opp_score: {}", game.my_score, game.opp_score);
-        eprintln!("my_served: {} opp_served: {}", game.served, game.opp_served);
-        // eprintln!("calculated turns left: {}", ((100 - game.turn) as f32 * ((6 - cmp::max(game.served, game.opp_served)) as f32 / 6.0)) as i8);
-        eprintln!("calculated turns left: {}", ((100 - game.turn) as f32 * (1.0 - (cmp::max(game.served, game.opp_served) as f32 / 7.0) as f32)) as i8);
-        let mut res: ((Action, f32), String) = find_best_action(&game, start_time);
+        let mut game: Game = get_turn_informations(turn, served);
+        let start_time = Instant::now();
+        eprintln!("my: {} opp: {}", game.my_score, game.opp_score);
+        let mut best_path: ((Vec<Action>, f32), String) = find_best_path(&game, &registered_path, &game_forecast, start_time);
+        registered_path = best_path.0.clone();
+        let action = registered_path.0.remove(0);
+        game_forecast = Some(simulate(&action, 0, &game));
         eprintln!("graph search duration: {:.3?}", start_time.elapsed());
-        let action = (res.0).0.clone();
+        eprintln!("action: {:?}", action);
         match &(action.action)[..] {
             "CAST" => {
-                println!("CAST {} {} {}", action.id, action.repeat, res.1);
+                println!("CAST {} {} {}", action.id, action.repeat, best_path.1);
             },
             "LEARN" => {
-                println!("LEARN {} {}", action.id, res.1);
+                println!("LEARN {} {}", action.id, best_path.1);
             },
             "REST" => {
-                println!("REST {}", res.1);
+                println!("REST {}", best_path.1);
             },
             "BREW" => {
-                println!("BREW {} {}", action.id, res.1);
+                println!("BREW {}", action.id);
                 served += 1;
             },
             _ => {
