@@ -219,13 +219,7 @@ fn simulate(action: &Action, depth: i32, game: &Game) -> Game {
         "BREW" => {
             game_simulation.served += 1;
             game_simulation.my_score += action.price;
-
-            // let mut diff = (game.opp_score + game.opp_inventory_score) - (game.my_score + inventory_final_score(delta_add(&game.inventory, &action.delta)));
-            // let scaled_diff = (diff as f32 - (-138.0)) / (20.0 - (-138.0));
-            // game_simulation.ratio += action.price as f32 / (1.0 + ((depth as f32 - 1.0) / scaled_diff));
-            // game_simulation.ratio += action.price as f32 / (1.0 + depth as f32) + delta_add(&game.inventory, &action.delta).iter().sum::<i8>() as f32;
             game_simulation.ratio += action.price as f32 - (2.0 * depth as f32) + delta_add(&game.inventory, &action.delta).iter().sum::<i8>() as f32;
-
             let brew_index = game_simulation.orders.iter().position(|brew| brew.id == action.id).expect("game_simulation.orders.iter().position(|brew| brew.id == action.id)");
             if brew_index == 0 && game_simulation.orders.len() > 1 {
                 game_simulation.orders[1].price += 2;
@@ -250,7 +244,7 @@ fn graph_search(solution: &mut Option<(Vec<Action>, f32)>, path: &mut Vec<Action
     *explored_nodes += 1;
     if game.ratio > solution.as_ref().unwrap().1 || (!solution.as_ref().unwrap().0.is_empty() && game.ratio == solution.as_ref().unwrap().1 && &(solution.as_ref().unwrap().0.first().unwrap().action)[..] == "CAST" && &(path.first().unwrap().action)[..] == "LEARN")  {
         *solution = Some((path.clone(), game.ratio));
-        eprint!("[!] new best price: {:.3} path: ", game.ratio); for action in solution.as_ref().unwrap().0.iter() { eprint!("{}, ", action.id); } eprintln!("");
+        // eprint!("[!] new best price: {:.3} path: ", game.ratio); for action in solution.as_ref().unwrap().0.iter() { eprint!("{}, ", action.id); } eprintln!("");
     }
     if path.len() > bound as usize {
         return true;
@@ -258,7 +252,7 @@ fn graph_search(solution: &mut Option<(Vec<Action>, f32)>, path: &mut Vec<Action
     for action in get_neighbors(game).iter() {
         path.push(action.clone());
         if (game.base_turn == 1 && start_time.elapsed().as_millis() > 998) || (game.base_turn > 1 && start_time.elapsed().as_millis() > 48) {
-            eprintln!("timeout at: {:.3?} bound: {} explored: {}", start_time.elapsed(), bound, explored_nodes);
+            // eprintln!("timeout at: {:.3?} bound: {} explored: {}", start_time.elapsed(), bound, explored_nodes);
             return false;
         }
         let simulation: Game = simulate(action, path.len() as i32, game);
@@ -326,13 +320,13 @@ fn main() {
         turn += 1;
         let mut game: Game = get_turn_informations(turn, served);
         let start_time = Instant::now();
-        eprintln!("my: {} opp: {}", game.my_score, game.opp_score);
+        // eprintln!("my: {} opp: {}", game.my_score, game.opp_score);
         let mut best_path: ((Vec<Action>, f32), String) = find_best_path(&game, &registered_path, &game_forecast, start_time);
         registered_path = best_path.0.clone();
         let action = registered_path.0.remove(0);
         game_forecast = Some(simulate(&action, 0, &game));
-        eprintln!("graph search duration: {:.3?}", start_time.elapsed());
-        eprintln!("action: {:?}", action);
+        // eprintln!("graph search duration: {:.3?}", start_time.elapsed());
+        // eprintln!("action: {:?}", action);
         match &(action.action)[..] {
             "CAST" => {
                 println!("CAST {} {} {}", action.id, action.repeat, best_path.1);
@@ -353,3 +347,4 @@ fn main() {
         }
     }
 }
+
