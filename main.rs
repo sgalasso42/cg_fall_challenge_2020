@@ -161,7 +161,7 @@ fn inventory_final_score(state: [i8; 4]) -> i32 {
 }
 
 fn get_available_brews(game: &Game) -> Vec<Action> {
-    return game.orders.iter().filter(|order| !delta_add(&game.inventory, &order.delta).iter().any(|el| *el < 0)).cloned().collect::<Vec<Action>>();
+    return game.orders.iter().filter(|order| !delta_add(&game.inventory, &order.delta).iter().any(|el| *el < 0) && (game.served < 5 || game.my_score + order.price as i32 + inventory_final_score(delta_add(&game.inventory, &order.delta)) > game.opp_score + game.opp_inventory_score)).cloned().collect::<Vec<Action>>();
 }
 
 fn get_available_spells(game: &Game) -> Vec<Action> {
@@ -199,8 +199,9 @@ fn get_available_learns(game: &Game) -> Vec<Action> {
 
 fn get_neighbors(game: &Game) -> Vec<Action> {
     let mut neighbors: Vec<Action> = Vec::new();
-    let calculated_turns_left: i32 = ((100 - game.calc_turn) as f32 / (1.0 + game.opp_served as f32)) as i32;
-    if game.calc_turn < game.turn + calculated_turns_left && game.served < 6 {
+    // let calculated_turns_left: i32 = ((100 - game.calc_turn) as f32 * ((6 - cmp::max(game.served, game.opp_served)) as f32 / 6.0)) as i32;
+    // let calculated_turns_left: i32 = ((100 - game.calc_turn) as f32 / (1.0 + cmp::max(game.served, game.opp_served) as f32)) as i32;
+    if game.calc_turn < 100 && game.served < 6 {
         neighbors = [&get_available_spells(&game)[..], &get_available_learns(&game)[..], &get_available_brews(&game)[..]].concat();
         if game.spells.iter().any(|spell| spell.castable == 0) {
             neighbors.push(Action::new("REST"));
@@ -217,14 +218,18 @@ fn path_score(path: &Vec<Action>, game: &Game) -> f32 {
         if &(action.action)[..] == "BREW" {
             // let turn = game.calc_turn + i as i32;
             // let coef: f32 = turn as f32 / 100.0;
-            // score += action.price as f32 / (1.0 + (i as f32/* / (1.0 - coef)*/)); // RELEASE
-            // score += action.price as f32 - action.price as f32 * (i as f32 / 100.0); // DEBUG
+            // score += action.price as f32 / (1.0 + (i as f32/* / (1.0 - coef)*/));
+            // score += action.price as f32 - action.price as f32 * (i as f32 / 100.0);
             // score += ((100 - i) as f32 * ((action.price as f32 * 100.0) / 126.0));
             // total_price += action.price;
             // nb += 1;
-            let calculated_turns_left: i8 = ((100 - (game.turn + i as i32)) as f32 / (1.0 + game.opp_served as f32)) as i8;
-            score += action.price as f32 - (action.price as f32 * (i as f32 / calculated_turns_left as f32));
+            
+            // let calculated_turns_left: i8 = ((100 - (game.turn + i as i32)) as f32 / (1.0 + cmp::max(game.served, game.opp_served) as f32)) as i8;
+            // let calculated_turns_left: i8 = ((100 - game.turn) as f32 * ((6 - cmp::max(game.served, game.opp_served)) as f32 / 6.0)) as i8;
+            // let calculated_turns_left: i8 = ((100 - game.turn) as f32 * (1.0 - (cmp::max(game.served, game.opp_served) as f32 / 7.0) as f32)) as i8;
+            // score += action.price as f32 - action.price as f32 * (i as f32 / (100 - (game.turn + i as i32)) as f32); // RELEASE
             // score += action.price as f32 / (1.0 + i as f32);
+            score += action.price as f32 / i as f32;
         }
     }
     // return score as f32 / path.len() as f32;
@@ -337,7 +342,10 @@ fn find_best_action(game: &Game, start_time: std::time::Instant) -> ((Action, f3
                     },
                     _ => {
                         if !neighbors.iter().any(|neighbour| neighbour.score > 0.0) {
-                            return ((game.book[0].clone(), 0.0), String::from("Well done !"));
+                            if game.book.len() > 0 {
+                                return ((game.book[0].clone(), 0.0), String::from("No path found"));
+                            }
+                            return ((Action::new("REST"), 0.0), String::from("No path found & no book left)"));
                         }
                         let mut max: (Action, f32) = (Action::new(""), 0.0);
                         for neighbour in neighbors.iter() {
@@ -352,7 +360,10 @@ fn find_best_action(game: &Game, start_time: std::time::Instant) -> ((Action, f3
                 }
             },
             _ => {
-                return ((game.book[0].clone(), 0.0), String::from("Need more power !"));
+                if game.book.len() > 0 {
+                    return ((game.book[0].clone(), 0.0), String::from("No path with score > 0"));
+                }
+                return ((Action::new("REST"), 0.0), String::from("No path found & no book left)"));
             }
         }
     }
@@ -375,33 +386,27 @@ fn main() {
         opp_served = game.opp_served;
         eprintln!("my_score: {} opp_score: {}", game.my_score, game.opp_score);
         eprintln!("my_served: {} opp_served: {}", game.served, game.opp_served);
-        // TIME LEFT ONLY BASED ON OPP_SERVED :
-        //      USE ALSO MY_SERVED BUT BE CAREFULL :
-        //          IF NO SOLUTION FOUND BETWEEN CURRENT TURN AND CALC_TURN_LEFT : UPDATE CALC_TURN_LEFT AND FIND A SOLUTION 
-        eprintln!("calculated turns left: {}", ((100 - game.turn) as f32 / (1.0 + game.opp_served as f32)) as i8);
-        if game.book.is_empty() {
-            println!("REST Oups !");
-        } else {
-            let mut res: ((Action, f32), String) = find_best_action(&game, start_time);
-            eprintln!("graph search duration: {:.3?}", start_time.elapsed());
-            let action = (res.0).0.clone();
-            match &(action.action)[..] {
-                "CAST" => {
-                    println!("CAST {} {} {}", action.id, action.repeat, res.1);
-                },
-                "LEARN" => {
-                    println!("LEARN {} {}", action.id, res.1);
-                },
-                "REST" => {
-                    println!("REST {}", res.1);
-                },
-                "BREW" => {
-                    println!("BREW {} {}", action.id, res.1);
-                    served += 1;
-                },
-                _ => {
-                    println!("REST [!] Who the fuck wrote this code [!]");
-                }
+        // eprintln!("calculated turns left: {}", ((100 - game.turn) as f32 * ((6 - cmp::max(game.served, game.opp_served)) as f32 / 6.0)) as i8);
+        eprintln!("calculated turns left: {}", ((100 - game.turn) as f32 * (1.0 - (cmp::max(game.served, game.opp_served) as f32 / 7.0) as f32)) as i8);
+        let mut res: ((Action, f32), String) = find_best_action(&game, start_time);
+        eprintln!("graph search duration: {:.3?}", start_time.elapsed());
+        let action = (res.0).0.clone();
+        match &(action.action)[..] {
+            "CAST" => {
+                println!("CAST {} {} {}", action.id, action.repeat, res.1);
+            },
+            "LEARN" => {
+                println!("LEARN {} {}", action.id, res.1);
+            },
+            "REST" => {
+                println!("REST {}", res.1);
+            },
+            "BREW" => {
+                println!("BREW {} {}", action.id, res.1);
+                served += 1;
+            },
+            _ => {
+                println!("REST [!] Who the fuck wrote this code [!]");
             }
         }
     }
