@@ -1,11 +1,12 @@
-# CG 2020 Fall Challenge Postmortem
+# CG 2020 Fall Challenge PostMortem
 
 ## Stats
-<img alt="Rust" src="https://img.shields.io/badge/Rust-orange?logo=rust"/>
+* Overall rank: 389 over 7011 players
+* Team rank (42 school): 4 over 197 players
+
 
 ## The challenge
 <div><img src="battle_demo.gif" width="300"/></div>
-<div><img src="elements.png" width="300"/></div>
 
 ## Wood1 League (Day 1)
 #### Rules
@@ -24,7 +25,8 @@ So I basically made a function to choose the two best potions I could do with my
 * We can use only one spell per turn.
 * Every time we use a spell, we have to REST to use it again, the REST action make all the used spells usable again, but it cost a turn.
 ### My strategy
-* There is the interesting feature of the challenge, the goal will be to arrange the inventory by using spells too have the necessary elements to make the potions. I started to imagine how to make a Graph search but I guessed that it was not necessary to go to Bronze league, so I just calculated the time necessary to make every potions, choose the fastests and apply spells. Submit -> Bronze :ok_hand:
+* There is the interesting feature of the challenge, the goal will be to arrange the inventory by using spells too have the necessary elements to make the potions. I started to imagine how to make a Graph search but I guessed that it was not necessary to go to Bronze league, so I just calculated the time necessary to make every potions, choose the fastests and apply spells.<br/>
+Submit -> Bronze :ok_hand:
 ## Bronze League (Day 2 to 5)
 ### Rules
 * We can now buy differents spells from a mutual book, once a sepll learn it disapear from the book,
@@ -40,7 +42,7 @@ I made the basics, a function to make neighbors for each nodes, SPELL, LEARN and
 
 Basically, what I was doing at this moment was, iterate over graph and stop as soon as it found a solution, then execute the first action of the path.
 
-I did some improvements as searching for multiple paths to find the best one during the 50 available ms, handling the 1000ms available on the first turn, and prioritize path that started by LEARN to avoid path destruction in case of the opponent take it. That was enougth to be more or less 60th on the scoreboard and pass to the Iron league when it oppened !
+I did some improvements as searching for multiple paths to find the best one during the 50 available ms, handling the 1000ms available on the first turn, and prioritize path that started by LEARN to avoid path destruction in case of the opponent take it. That was enougth to be more or less 60th on the scoreboard and pass to the Iron league when it oppened :v: !
 ## Iron League (Day 5 to 12)
 * No new rules, the Bronze ones where the last to change
 ### My strategy
@@ -56,5 +58,23 @@ for (i, action) in path.iter().enumerate() {
 I also defined a default action in case of no found path, it was to LEARN the first spell of the book, it was free and could unstuck the situation. Problem though: more actions equal more neighbors equal less time to explore depth. I also added a condition in case of I had an empty inventory: fill the half of it.
 
 Gold league open and... I didn't pass ! They took only 10% of the Iron one :scream:
+
+So I tried features as adding a memory function to keep passed found path for some situations and others. I updated my scoring function taking care of the number of passed turns and the probable number of turns remaining, the score difference between players and the numbers of orders every players has served... I also made a lot of optimisations, code refactoring and data structure compressions but nothing pushed me on the Gold league !
+
+So I changed my strategy, I made a MCTS with one neighbors depth, and tried to run a maximum of simulations from every first depth nodes and compute a score from it, made optimisations for it and after hours of coding got the result: still stuck in Iron ! Arg !
+
+At this moment I knew that the problem was my scoring functions, my features were logic but didn't pushed me upper on the scoreboard, so the last night I just tried everything to make this &%#!!$$$% of scoring function doing something right.
+
+4am: I gave up the MCTS, my IDDFS were pusing me upper on the ranking, tried my best to optimize it to finish not bad on the Iron league scoreboard.
+
+8am: I checked the scoreboard, and see NicolaH_42 with who I was working, and who was stuck as me on the scoring function in Iron, passing Gold, he finally found a good one, well quite simple but fitting on my program:
+```
+for (i, action) in path.iter().enumerate() {
+  score += action.price - (2.0 * depth as f32) + inventory_nb_of_elements(&game);
+}
+```
+Still have 2 hours to pass Gold, I tried that one, submitted, waited 1 hour because everyone were submitting at the same moment... and finally passed Gold :clap:
+
 ## Gold League (Day 12)
 One hour left to do something and try to gain some rank before the end of the contest, and I seriously need to sleep..
+I try to apply the function on the MCTS to see if it make something magic... Nope, even by normalizing the (2 * i), no time to try something else, I submit the IDDFS and it's 10am the challenge end !
