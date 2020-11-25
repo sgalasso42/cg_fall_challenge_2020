@@ -106,7 +106,7 @@ fn graph_search(cost, bound, game) -> bool {
   for neighbour in find_neighbors().iter() {
     if timeout => return false;
     simulation = simulate(game);
-    graph_search(cost + 1, bound, game)
+    graph_search(cost + 1, bound, simulation)
   }
 }
 
@@ -115,7 +115,7 @@ fn find_best_path(game) {
     if !graph_search(0, bound, game) => break;
     bound += 1;
   }
-  if game_not_altered && old_path_score > path_score => return stored_path;
+  if game_not_altered && stored_path.score > path_score => return stored_path;
   if path any found => return path; // LEARN first cast of book in case of first 5 turns
   if inventory.is_empty() => return CAST to fill it; // REST in case of no possible actions
   return LEARN first cast of book;
