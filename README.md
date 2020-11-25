@@ -1,17 +1,21 @@
 # CG 2020 Fall Challenge PostMortem
 
 ## Stats
-* Overall rank: 389 over 7011 players
-* Team rank (42 school): 4 over 197 players
+* Overall rank: 389 out of 7011 players
+* Team rank (42 school): 4 out of 197 players
 
 ## The challenge
+Basically, we control a witch that can prepare and sell potions, <a href=https://www.codingame.com/challengereport/28507351a92c5398f4545e49406f995619744234>official rules here</a> 
 <div><img src="battle_demo.gif" width="300"/></div>
 
 ## My Progression (Lazy to read ? Pseudocode at the end)
 ### Wood1 League (Day 1)
 #### Rules
-* We have a filled inventory and two spells to do.
-* There is a set of simple potions to do, and our inventory is filled with some elements
+* We have an inventory of some elements tier0, tier1, tier2 and tier3.
+* There is a set of orders that each need differents elements to be prepared.
+* We can use one BREW action per turn to serve an order, the player earn the price of the order.
+* The first player who served 2 orders end the battle.
+* The winner is the one with the best score;
 So I basically made a function to choose the two best potions I could do with my inventory, and that was enougth to pass Wood2.
 ### Wood2 League (Day 1)
 #### Rules
