@@ -72,7 +72,7 @@ At this moment I knew that the problem was my scoring functions, my features wer
 
 4am: I gave up the MCTS, my IDDFS were pusing me upper on the ranking, tried my best to optimize it to finish not bad on the Iron league scoreboard.
 
-8am: I checked the scoreboard, and see NicolaH_42 with who I was working, and who was stuck as me on the scoring function in Iron, passing Gold, he finally found a good one, well quite simple but fitting on my program:
+8am: I checked the scoreboard, and see <a href=https://github.com/nihuynh>NicolasH_42<a/> with who I was working, and who was stuck as me on the scoring function in Iron, passing Gold, he finally found a good one, well quite simple but fitting on my program:
 ```
 for (i, action) in path.iter().enumerate() {
   score += action.price - (2.0 * depth as f32) + inventory_nb_of_elements(&game);
