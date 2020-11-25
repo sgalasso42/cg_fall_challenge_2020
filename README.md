@@ -15,7 +15,8 @@ Basically, we control a witch that can prepare and sell potions, <a href=https:/
 * There is a set of orders that each need differents elements to be prepared.
 * We can use one BREW action per turn to serve an order, the player earn the price of the order.
 * The first player who served 2 orders end the battle.
-* The winner is the one with the best score;
+* The winner is the one with the best score.
+#### My strategy
 So I basically made a function to choose the two best potions I could do with my inventory, and that was enougth to pass Wood2.
 ### Wood2 League (Day 1)
 #### Rules
